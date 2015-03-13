@@ -1,0 +1,210 @@
+#!/bin/bash
+
+function create {
+	# Name of new release branch to be created
+	RELEASE_BRANCH=$2
+
+	# Path to text file which contains branches to be merged
+	RELEASE_FILE=$1
+
+	if [ -z "$RELEASE_BRANCH" ] || [ -z "$RELEASE_FILE" ]
+	then
+	    echo "Usage `basename $0` filename branchname" >&2
+	    exit 1;
+	fi
+
+	echo "Creating $RELEASE_BRANCH..."
+
+	git checkout -b $RELEASE_BRANCH master
+
+	cp $RELEASE_FILE $RELEASE_BRANCH
+
+	git add $RELEASE_BRANCH
+
+	git commit -m "Adding Release Branch Definition file"
+
+	for BRANCH in `cat $RELEASE_FILE`
+	do
+	    git merge --no-ff --no-edit $BRANCH
+	done	
+}
+
+function roll {
+	# Name of new release branch to be created
+	RELEASE_BRANCH=$(nextreleasebranch)
+
+	echo "Creating $RELEASE_BRANCH..."
+
+	git checkout -b $RELEASE_BRANCH master
+
+	writereleasefile
+
+	git add $RELEASE_BRANCH
+
+	git commit -m "Adding Release Branch Definition file"
+
+	for BRANCH in $(branches)
+	do
+	    git merge --no-ff --no-edit $BRANCH
+	done
+}
+
+function dump {
+	RELEASE_BRANCH=$(releasebranch)
+	echo "Dumping $RELEASE_BRANCH, correct? (Y/N):"
+	read DUMP
+	if [ "$DUMP" = "Y" ]
+	then
+		git checkout master
+		git branch -D $RELEASE_BRANCH
+		RELEASE_CANDIDATE=`git config --get-all releases.candidate`
+		git config --local --replace-all releases.candidate "$((RELEASE_CANDIDATE-1))"
+	fi
+}
+
+function writereleasefile {
+	echo "" > $(releasebranch)
+	for BRANCH in $(branches)
+	do
+	    echo $BRANCH >> $(releasebranch)
+	done	
+}
+
+function readinreleasefile {
+	for BRANCH in `cat $(current)`
+	do
+	    add $BRANCH
+	done
+	status
+}
+
+function findfeature {
+	FEAUTURE_BRANCH=$1
+	if [ -z "$FEAUTURE_BRANCH" ]
+	then
+		echo "Enter Feature Branch: "
+		read FEAUTURE_BRANCH
+	fi
+	BRANCHES=`git branch -a | grep $FEAUTURE_BRANCH`
+	echo "Branches Found: $BRANCHES"
+}
+
+function add {
+	FEAUTURE_BRANCH=$1
+	CURRENT_RELEASE=$(current)
+	if [ -z "CURRENT_RELEASE" ]
+		then
+		echo "No Release is Initialized"
+		exit 1;
+	fi
+	git config --add releases.branches $FEAUTURE_BRANCH
+}
+
+function remove {
+	FEAUTURE_BRANCH=$1
+	BRANCHES=$(branches)
+	git config --unset-all releases.branches
+	for BRANCH in $BRANCHES
+	do
+		if [ "$FEAUTURE_BRANCH" != "$BRANCH" ]
+			then
+			add $BRANCH
+		fi
+	done
+}
+
+function releasebranch {
+	echo "$(current)-rc$(candidate)"
+}
+
+function nextreleasebranch {
+	echo "$(current)-rc$(nextcandidate)"
+}
+
+function candidate {
+	git config --get-all releases.candidate
+}
+
+function nextcandidate {
+	RELEASE_CANDIDATE=`git config --get-all releases.candidate`
+	git config --local --replace-all releases.candidate "$((RELEASE_CANDIDATE+1))"
+	echo "$((RELEASE_CANDIDATE+1))"
+}
+
+function current {
+	# "Used to list the release info"
+	git config --get-all releases.current
+}
+
+function branches {
+	git config --get-all releases.branches
+}
+
+function status {
+	if [ -z $(current)]
+		then
+		echo " "
+		echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = "
+		echo "  No Release Found: run 'git release init' to setup release"
+		echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = "
+		echo " "
+	fi
+	echo "Current Release: $(current)"
+	echo "Release Branch:  $(releasebranch)"
+	echo "Branches in this Release:"
+	for BRANCH in $(branches)
+	do
+		echo " ++ $BRANCH"
+	done
+}
+
+function init {
+	echo "Enter Release Version (e.g. 15.001.0 or 1.0.0):"
+	read RELEASE_VERSION
+
+	echo "Enter Release Candidate Version (e.g. 1,2,3... or blank for 1):"
+	read RELEASE_CANDIDATE
+
+	if [ -z "$RELEASE_CANDIDATE" ]
+		then
+		RELEASE_CANDIDATE="1"
+	fi
+
+	git config --local --replace-all releases.version $RELEASE_VERSION
+	git config --local --replace-all releases.candidate $RELEASE_CANDIDATE
+
+	RELEASE="release-v$RELEASE_VERSION"
+	git config --local --replace-all releases.current $RELEASE
+
+	status
+}
+
+COMMAND=$1
+
+if [ -z "$COMMAND" ]
+	then 
+	status
+	echo " "
+	echo " * * * HELP * * * * * * * * "
+	echo " "
+	echo " There are 2 ways to use 'git release':"
+	echo " "
+	echo "  1. Automatic :: 'git release init' stores the release versioning information in 'git config'"
+	echo "        - use 'git release init' to configure release versions"
+	echo "        - use 'git release add' to add feature branches into the list to release"
+	echo "        - use 'git release remove' to remove feature branches from the list"
+	echo "        - use 'git release status' to see what version you are on and the branches added"
+	echo "        - use 'git release roll' to roll out a new release candidate branch, which:"
+	echo "             + Creates a new branch based on release versioning, incrementing the RC"
+	echo "             + Commits the Branch list to the new branch"
+	echo "             + Merges in each of the added feature branches"
+	echo "        - use 'git release dump' deletes release branch and rollsback the candidate version."
+	echo " "
+	echo "  2. Manual :: 'git create [release-file]' stores the release versioning information in a simple file on the disk"
+	echo "        - Release file sits on root of repo, and contains list of branches, one branch per line."
+	echo " "
+	echo " * * * * * * * * * * * * * * "
+	echo " "
+fi
+
+$COMMAND $2 $3
