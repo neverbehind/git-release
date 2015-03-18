@@ -47,6 +47,26 @@ function roll {
 	do
 	    git merge --no-ff --no-edit $BRANCH
 	done
+
+	git push origin $RELEASE_BRANCH
+}
+
+function stage {
+	RELEASE_BRANCH=$(releasebranch)
+	git checkout staging
+	git merge --no-ff --no-edit $RELEASE_BRANCH
+	git push origin staging
+}
+
+function deploy {
+	RELEASE_BRANCH=$(releasebranch)
+	git checkout master
+	git merge --no-ff --no-edit $RELEASE_BRANCH
+	#git push origin master
+}
+
+function push {
+	git push origin $(releasebranch)
 }
 
 function dump {
@@ -71,6 +91,7 @@ function writereleasefile {
 }
 
 function readinreleasefile {
+	git config --unset-all releases.branches
 	for BRANCH in `cat $(current)`
 	do
 	    add $BRANCH
@@ -141,7 +162,7 @@ function branches {
 }
 
 function status {
-	if [ -z $(current)]
+	if [ -z $(current) ]
 		then
 		echo " "
 		echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = "
@@ -151,7 +172,7 @@ function status {
 	fi
 	echo "Current Release: $(current)"
 	echo "Release Branch:  $(releasebranch)"
-	echo "Branches in this Release:"
+	echo "Branches in this Release: $(releasebranch)"
 	for BRANCH in $(branches)
 	do
 		echo " ++ $BRANCH"
