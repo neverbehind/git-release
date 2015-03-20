@@ -137,6 +137,33 @@ function findfeature {
 	echo "Branches Found: $BRANCHES"
 }
 
+function feature {
+	FEAUTURE_BRANCH=$1
+	if [ -z "$FEAUTURE_BRANCH" ]
+	then
+		echo "Enter Feature Branch: "
+		read FEAUTURE_BRANCH
+	fi
+	BRANCHES=`git branch -a | grep $FEAUTURE_BRANCH`
+	OPTION=0
+	OPTIONLIST=()
+	echo "Branches Found:"
+	for BRANCH in $BRANCHES
+	do
+		echo "$OPTION $BRANCH"
+		OPTIONLIST[OPTION]=$BRANCH
+		OPTION=$((OPTION+1))
+	done
+	echo "Select Branch to Add: (X = cancel)"
+	read CHOICE
+	if [ "$CHOICE" = "X" ]
+		then exit;
+	fi
+	echo ${OPTIONLIST[$CHOICE]}
+	add ${OPTIONLIST[$CHOICE]}
+	status
+}
+
 function add {
 	FEAUTURE_BRANCH=$1
 	CURRENT_RELEASE=$(current)
@@ -154,11 +181,12 @@ function remove {
 	clearbranches
 	for BRANCH in $BRANCHES
 	do
-		if [ "$FEAUTURE_BRANCH" != "$BRANCH" ]
+		if [ "$1" != "$BRANCH" ]
 			then
 			add $BRANCH
 		fi
 	done
+	status
 }
 
 function releasebranch {
