@@ -51,13 +51,15 @@ function roll {
 	git push origin $RELEASE_BRANCH
 }
 
-function run {
+function append {
 	# Name of new release branch to be created
 	RELEASE_BRANCH=$(releasebranch)
 
 	echo "Creating $RELEASE_BRANCH..."
 
 	git checkout -b $RELEASE_BRANCH master
+
+	git checkout $RELEASE_BRANCH
 
 	writereleasefile
 
@@ -141,7 +143,7 @@ function feature {
 	FEAUTURE_BRANCH=$1
 	if [ -z "$FEAUTURE_BRANCH" ]
 	then
-		echo "Enter Feature Branch: "
+		echo "Enter part of a Feature Branch name: (we will search for it) "
 		read FEAUTURE_BRANCH
 	fi
 	BRANCHES=`git branch -a | grep $FEAUTURE_BRANCH`
@@ -156,7 +158,7 @@ function feature {
 	done
 	echo "Select Branch to Add: (X = cancel)"
 	read CHOICE
-	if [ "$CHOICE" = "X" ]
+	if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
 		then exit;
 	fi
 	echo ${OPTIONLIST[$CHOICE]}
@@ -270,12 +272,14 @@ if [ -z "$COMMAND" ]
 	echo "  1. Automatic :: 'git release init' stores the release versioning information in 'git config'"
 	echo "        - use 'git release init' to configure release versions"
 	echo "        - use 'git release add' to add feature branches into the list to release"
+	echo "        - use 'git release feature' to search for and add feature branches into the list to release"
 	echo "        - use 'git release remove' to remove feature branches from the list"
 	echo "        - use 'git release status' to see what version you are on and the branches added"
 	echo "        - use 'git release roll' to roll out a new release candidate branch, which:"
 	echo "             + Creates a new branch based on release versioning, incrementing the RC"
 	echo "             + Commits the Branch list to the new branch"
 	echo "             + Merges in each of the added feature branches"
+	echo "        - use 'git release append' similar to roll, but uses current release branch"
 	echo "        - use 'git release dump' deletes release branch and rollsback the candidate version."
 	echo " "
 	echo "  2. Manual :: 'git create [release-file]' stores the release versioning information in a simple file on the disk"
