@@ -1,32 +1,26 @@
 #!/bin/bash
 
-function create {
-	# Name of new release branch to be created
-	RELEASE_BRANCH=$2
+function init {
+	echo "Enter Release Version (e.g. 15.001.0 or 1.0.0):"
+	read RELEASE_VERSION
 
-	# Path to text file which contains branches to be merged
-	RELEASE_FILE=$1
+	echo "Enter Release Candidate Version (e.g. 1,2,3... or blank for 0, first roll will be 1):"
+	read RELEASE_CANDIDATE
 
-	if [ -z "$RELEASE_BRANCH" ] || [ -z "$RELEASE_FILE" ]
-	then
-	    echo "Usage `basename $0` filename branchname" >&2
-	    exit 1;
+	if [ -z "$RELEASE_CANDIDATE" ]
+		then
+		RELEASE_CANDIDATE="0"
 	fi
 
-	echo "Creating $RELEASE_BRANCH..."
+	git config --local --replace-all releases.version $RELEASE_VERSION
+	git config --local --replace-all releases.candidate $RELEASE_CANDIDATE
 
-	git checkout -b $RELEASE_BRANCH master
+	RELEASE="release-v$RELEASE_VERSION"
+	git config --local --replace-all releases.current $RELEASE
 
-	cp $RELEASE_FILE $RELEASE_BRANCH
+	clearbranches
 
-	git add $RELEASE_BRANCH
-
-	git commit -m "Adding Release Branch Definition file"
-
-	for BRANCH in `cat $RELEASE_FILE`
-	do
-	    git merge --no-ff --no-edit $BRANCH
-	done	
+	status
 }
 
 function roll {
@@ -43,12 +37,29 @@ function roll {
 
 	git commit -m "Adding Release Branch Definition file"
 
-	for BRANCH in $(branches)
-	do
-	    git merge --no-ff --no-edit $BRANCH
-	done
+	mergebranches
 
 	git push origin $RELEASE_BRANCH
+}
+
+function next {
+	# Name of new release branch to be created
+	RELEASE_BRANCH=$(releasebranch)
+	NEXT_RELEASE_BRANCH=$(nextreleasebranch)
+
+	echo "Creating $RELEASE_BRANCH..."
+
+	git checkout -b $NEXT_RELEASE_BRANCH $RELEASE_BRANCH
+
+	writereleasefile
+
+	git add $(current)
+
+	git commit -m "Appending Release Branch Definition file"
+
+	mergebranches
+
+	git push origin $NEXT_RELEASE_BRANCH
 }
 
 function append {
@@ -65,14 +76,20 @@ function append {
 
 	git add $(current)
 
-	git commit -m "Adding Release Branch Definition file"
+	git commit -m "Appending Release Branch Definition file"
 
-	for BRANCH in $(branches)
-	do
-	    git merge --no-ff --no-edit $BRANCH
-	done
+	mergebranches
 
 	git push origin $RELEASE_BRANCH
+}
+
+function mergebranches {
+	git remote update
+	for BRANCH in $(branches)
+	do
+		echo "MERGING: $BRANCH ++++++++++++++++++++++++"
+	    git merge --no-ff --no-edit $BRANCH
+	done	
 }
 
 function stage {
@@ -89,6 +106,34 @@ function deploy {
 	git push origin master
 }
 
+function cleanrelease {
+	CURRENT_RELEASE=$1
+	if [ -z "$CURRENT_RELEASE" ]
+		then CURRENT_RELEASE=$(current)
+	fi
+	
+	echo "Looking for Old Release Branches for $CURRENT_RELEASE..."
+	OLD_RELEASES=`git branch -r --no-merged | grep $CURRENT_RELEASE`
+	
+	if [ -z "$OLD_RELEASES" ]
+	then 
+		echo "No Old Release branches found"
+		exit;
+	fi
+
+	for OLD_RELEASE_BRANCH in $OLD_RELEASES
+	do
+		RELEASE_ONLY=${OLD_RELEASE_BRANCH##*/}
+	    echo "Remove: $RELEASE_ONLY (Y/N)"
+	    read CHOICE
+	    if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
+		then 
+			git push origin --delete $RELEASE_ONLY
+			git branch -D $RELEASE_ONLY
+		fi
+	done
+}
+
 function push {
 	git push origin $(releasebranch)
 }
@@ -99,6 +144,7 @@ function dump {
 	read DUMP
 	if [ "$DUMP" = "Y" ]
 	then
+		git reset --hard
 		git checkout master
 		git branch -D $RELEASE_BRANCH
 		git push origin --delete $RELEASE_BRANCH
@@ -107,12 +153,20 @@ function dump {
 	fi
 }
 
+function writeout {
+	writereleasefile
+}
+
 function writereleasefile {
 	echo "" > $(current)
 	for BRANCH in $(branches)
 	do
 	    echo $BRANCH >> $(current)
 	done	
+}
+
+function readin {
+	readinreleasefile
 }
 
 function readinreleasefile {
@@ -146,7 +200,7 @@ function feature {
 		echo "Enter part of a Feature Branch name: (we will search for it) "
 		read FEAUTURE_BRANCH
 	fi
-	BRANCHES=`git branch -a | grep $FEAUTURE_BRANCH`
+	BRANCHES=`git branch -a | grep remotes | grep $FEAUTURE_BRANCH`
 	OPTION=0
 	OPTIONLIST=()
 	echo "Branches Found:"
@@ -178,14 +232,14 @@ function add {
 }
 
 function remove {
-	FEAUTURE_BRANCH=$1
-	BRANCHES=$(branches)
+	RM_FEAUTURE_BRANCH=$1
+	RM_BRANCHES=$(branches)
 	clearbranches
-	for BRANCH in $BRANCHES
+	for RM_BRANCH in $RM_BRANCHES
 	do
-		if [ "$1" != "$BRANCH" ]
+		if [ "$1" != "$RM_BRANCH" ]
 			then
-			add $BRANCH
+			add $RM_BRANCH
 		fi
 	done
 	status
@@ -236,27 +290,34 @@ function status {
 	done
 }
 
-function init {
-	echo "Enter Release Version (e.g. 15.001.0 or 1.0.0):"
-	read RELEASE_VERSION
+#depreciated
+function originalcreate {
+	# Name of new release branch to be created
+	RELEASE_BRANCH=$2
 
-	echo "Enter Release Candidate Version (e.g. 1,2,3... or blank for 1):"
-	read RELEASE_CANDIDATE
+	# Path to text file which contains branches to be merged
+	RELEASE_FILE=$1
 
-	if [ -z "$RELEASE_CANDIDATE" ]
-		then
-		RELEASE_CANDIDATE="1"
+	if [ -z "$RELEASE_BRANCH" ] || [ -z "$RELEASE_FILE" ]
+	then
+	    echo "Usage `basename $0` filename branchname" >&2
+	    exit 1;
 	fi
 
-	git config --local --replace-all releases.version $RELEASE_VERSION
-	git config --local --replace-all releases.candidate $RELEASE_CANDIDATE
+	echo "Creating $RELEASE_BRANCH..."
 
-	RELEASE="release-v$RELEASE_VERSION"
-	git config --local --replace-all releases.current $RELEASE
+	git checkout -b $RELEASE_BRANCH master
 
-	clearbranches
+	cp $RELEASE_FILE $RELEASE_BRANCH
 
-	status
+	git add $RELEASE_BRANCH
+
+	git commit -m "Adding Release Branch Definition file"
+
+	for BRANCH in `cat $RELEASE_FILE`
+	do
+	    git merge --no-ff --no-edit $BRANCH
+	done
 }
 
 COMMAND=$1
@@ -279,7 +340,8 @@ if [ -z "$COMMAND" ]
 	echo "             + Creates a new branch based on release versioning, incrementing the RC"
 	echo "             + Commits the Branch list to the new branch"
 	echo "             + Merges in each of the added feature branches"
-	echo "        - use 'git release append' similar to roll, but uses current release branch"
+	echo "        - use 'git release append' similar to roll, but doesn't create a new release branch, simple remerges all branches into the current RC"
+	echo "        - use 'git release next' similar to roll, but uses current release branch as the base branch, instead of master"
 	echo "        - use 'git release dump' deletes release branch and rollsback the candidate version."
 	echo " "
 	echo "  2. Manual :: 'git create [release-file]' stores the release versioning information in a simple file on the disk"
