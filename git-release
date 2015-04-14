@@ -154,6 +154,7 @@ function dump {
 }
 
 function writeout {
+	git checkout $(releasebranch)
 	writereleasefile
 }
 
@@ -175,6 +176,7 @@ function readinreleasefile {
 	do
 	    add $BRANCH
 	done
+	git reset --hard
 	status
 }
 
