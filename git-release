@@ -134,6 +134,39 @@ function cleanrelease {
 	done
 }
 
+function cleanupmergedlocalbranches {
+	MERGED_BRANCHES=`git branch --merged | grep -v release | grep -v master`
+	for RMM_BRANCH in $MERGED_BRANCHES
+	do
+		echo "Pulling Branch: $RMM_BRANCH"
+		echo "$RMM_BRANCH shows to be merged to master, remove?"
+		read CHOICE
+		if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
+		then 
+			git branch -d $RMM_BRANCH
+		fi
+	done
+}
+
+function cleanupmergedremotebranches {
+	MERGED_BRANCHES=`git branch -a --merged | grep remotes | grep -v release | grep -v master`
+	for RMM_BRANCH in $MERGED_BRANCHES
+	do
+		echo "Pulling Branch: $RMM_BRANCH"
+		RMM_BRANCH_ONLY=${RMM_BRANCH##*/}
+		RELEASE_BRANCHES=$(branches)
+		if [[ $RELEASE_BRANCHES == *"$RMM_BRANCH"* ]]
+			then
+				echo "Found in current release !!! $RMM_BRANCH"
+			fi 
+		if [[ $RELEASE_BRANCHES != *"$RMM_BRANCH"* ]]
+			then
+			echo "$RMM_BRANCH shows to be merged to master, removing..."
+			git push origin --delete $RMM_BRANCH_ONLY
+		fi
+	done
+}
+
 function push {
 	git push origin $(releasebranch)
 }
@@ -346,7 +379,7 @@ if [ -z "$COMMAND" ]
 	echo "        - use 'git release next' similar to roll, but uses current release branch as the base branch, instead of master"
 	echo "        - use 'git release dump' deletes release branch and rollsback the candidate version."
 	echo " "
-	echo "  2. Manual :: 'git create [release-file]' stores the release versioning information in a simple file on the disk"
+	echo "  2. Manual :: 'git originalcreate [release-file]' stores the release versioning information in a simple file on the disk"
 	echo "        - Release file sits on root of repo, and contains list of branches, one branch per line."
 	echo " "
 	echo " * * * * * * * * * * * * * * "
