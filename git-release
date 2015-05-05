@@ -1,11 +1,19 @@
 #!/bin/bash
 
 function init {
-	echo "Enter Release Version (e.g. 15.001.0 or 1.0.0):"
-	read RELEASE_VERSION
+	RELEASE_VERSION=$1
+	if [ -z "$RELEASE_VERSION" ]
+	then 
+		echo "Enter Release Version (e.g. 15.001.0 or 1.0.0):"
+		read RELEASE_VERSION
+	fi
 
-	echo "Enter Release Candidate Version (e.g. 1,2,3... or blank for 0, first roll will be 1):"
-	read RELEASE_CANDIDATE
+	RELEASE_CANDIDATE=$2
+	if [ -z "$RELEASE_CANDIDATE" ]
+	then 
+		echo "Enter Release Candidate Version (e.g. 1,2,3... or blank for 0, first roll will be 1):"
+		read RELEASE_CANDIDATE
+	fi
 
 	if [ -z "$RELEASE_CANDIDATE" ]
 		then
@@ -21,6 +29,45 @@ function init {
 	clearbranches
 
 	status
+}
+
+function checkout {
+
+	echo "Looking for Release Branches..."
+	AVAIL_RELEASES=`git branch -r | grep origin/release-v`
+	
+	if [ -z "$AVAIL_RELEASES" ]
+	then 
+		echo "No Old Release branches found"
+		exit;
+	fi
+
+	OPTION=0
+	OPTIONLIST=()
+	echo "Release Branches Found:"
+	for AVAIL_RELEASE in $AVAIL_RELEASES
+	do
+		echo "$OPTION $AVAIL_RELEASE"
+		OPTIONLIST[OPTION]=$AVAIL_RELEASE
+		OPTION=$((OPTION+1))
+	done
+	echo "Select Branch to Add: (X = cancel)"
+	read CHOICE
+	if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
+		then exit;
+	fi
+	CHOSEN_RELEASE=${OPTIONLIST[$CHOICE]}
+	RELEASE_BRANCH=${CHOSEN_RELEASE##*/}
+	RELEASE_ONLY=${RELEASE_BRANCH%-*}
+	RELEASE_VERSION=${RELEASE_ONLY#*-v}
+	RELEASE_CANDIDATE=${RELEASE_BRANCH#*rc}
+
+	echo "Initializing Version: $RELEASE_VERSION rc: $RELEASE_CANDIDATE..."
+
+	init $RELEASE_VERSION $RELEASE_CANDIDATE
+
+	git checkout $RELEASE_BRANCH
+	readinreleasefile
 }
 
 function roll {
@@ -366,10 +413,10 @@ if [ -z "$COMMAND" ]
 	echo " There are 2 ways to use 'git release':"
 	echo " "
 	echo "  1. Automatic :: 'git release init' stores the release versioning information in 'git config'"
-	echo "        - use 'git release init' to configure release versions"
-	echo "        - use 'git release add' to add feature branches into the list to release"
-	echo "        - use 'git release feature' to search for and add feature branches into the list to release"
-	echo "        - use 'git release remove' to remove feature branches from the list"
+	echo "        - use 'git release init [version] [candidate]' to configure release versions"
+	echo "        - use 'git release add [full remote branch path]' to add feature branches into the list to release"
+	echo "        - use 'git release feature [branch search string]' to search for and add feature branches into the list to release"
+	echo "        - use 'git release remove [full remote branch path]' to remove feature branches from the list"
 	echo "        - use 'git release status' to see what version you are on and the branches added"
 	echo "        - use 'git release roll' to roll out a new release candidate branch, which:"
 	echo "             + Creates a new branch based on release versioning, incrementing the RC"
@@ -377,6 +424,7 @@ if [ -z "$COMMAND" ]
 	echo "             + Merges in each of the added feature branches"
 	echo "        - use 'git release append' similar to roll, but doesn't create a new release branch, simple remerges all branches into the current RC"
 	echo "        - use 'git release next' similar to roll, but uses current release branch as the base branch, instead of master"
+	echo "        - use 'git release checkout' displays a list of release branches, allows for switching from release to release"
 	echo "        - use 'git release dump' deletes release branch and rollsback the candidate version."
 	echo " "
 	echo "  2. Manual :: 'git originalcreate [release-file]' stores the release versioning information in a simple file on the disk"
