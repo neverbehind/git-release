@@ -153,6 +153,21 @@ function deploy {
 	git push origin master
 }
 
+function devbranches {
+	DEV_BRANCH=$(devbranch)
+	if [ -z "$DEV_BRANCH" ]
+		then 
+			echo "There is no development branch configured (in git config --local releases.devbranch)..."
+			echo "Enter your development branch name:"
+			read DEV_BRANCH
+			git config --local --replace-all releases.devbranch $DEV_BRANCH
+	fi
+	git checkout $DEV_BRANCH
+	git pull
+	git remote update
+	comm -12 <(git branch -r --no-merged master) <(git branch -r --merged $DEV_BRANCH) | grep -v $DEV_BRANCH | grep -v release	
+}
+
 function cleanrelease {
 	CURRENT_RELEASE=$1
 	if [ -z "$CURRENT_RELEASE" ]
@@ -335,14 +350,14 @@ function nextreleasebranch {
 	echo "$(current)-rc$(nextcandidate)"
 }
 
-function candidate {
-	git config --get-all releases.candidate
-}
-
 function nextcandidate {
 	RELEASE_CANDIDATE=`git config --get-all releases.candidate`
 	git config --local --replace-all releases.candidate "$((RELEASE_CANDIDATE+1))"
 	echo "$((RELEASE_CANDIDATE+1))"
+}
+
+function candidate {
+	git config --get-all releases.candidate
 }
 
 function current {
@@ -352,6 +367,11 @@ function current {
 
 function branches {
 	git config --get-all releases.branches
+}
+
+function devbranch {
+	# "Used to fetch the stored development branch"
+	git config --get-all releases.devbranch
 }
 
 function status {
@@ -424,8 +444,9 @@ if [ -z "$COMMAND" ]
 	echo "             + Merges in each of the added feature branches"
 	echo "        - use 'git release append' similar to roll, but doesn't create a new release branch, simple remerges all branches into the current RC"
 	echo "        - use 'git release next' similar to roll, but uses current release branch as the base branch, instead of master"
-	echo "        - use 'git release checkout' displays a list of release branches, allows for switching from release to release"
 	echo "        - use 'git release dump' deletes release branch and rollsback the candidate version."
+	echo "        - use 'git release checkout' displays a list of release branches, allows for switching from release to release"
+	echo "        - use 'git release devbranches' to list out branches that are contained in the development branch, that are not yet on master"
 	echo " "
 	echo "  2. Manual :: 'git originalcreate [release-file]' stores the release versioning information in a simple file on the disk"
 	echo "        - Release file sits on root of repo, and contains list of branches, one branch per line."
