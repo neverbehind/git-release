@@ -248,6 +248,10 @@ function dump {
 	fi
 }
 
+function edit {
+	nano $(current)
+}
+
 function writeout {
 	git checkout $(releasebranch)
 	writereleasefile
@@ -280,24 +284,13 @@ function clearbranches {
 }
 
 function findfeature {
-	FEAUTURE_BRANCH=$1
-	if [ -z "$FEAUTURE_BRANCH" ]
-	then
-		echo "Enter Feature Branch: "
-		read FEAUTURE_BRANCH
-	fi
-	BRANCHES=`git branch -a | grep $FEAUTURE_BRANCH`
-	echo "Branches Found: $BRANCHES"
-}
-
-function feature {
-	FEAUTURE_BRANCH=$1
-	if [ -z "$FEAUTURE_BRANCH" ]
+	FEAUTURE_QUERY=$1
+	if [ -z "$FEAUTURE_QUERY" ]
 	then
 		echo "Enter part of a Feature Branch name: (we will search for it) "
-		read FEAUTURE_BRANCH
+		read FEAUTURE_QUERY
 	fi
-	BRANCHES=`git branch -a | grep remotes | grep $FEAUTURE_BRANCH`
+	BRANCHES=`git branch -a | grep remotes | grep $FEAUTURE_QUERY`
 	OPTION=0
 	OPTIONLIST=()
 	echo "Branches Found:"
@@ -312,20 +305,30 @@ function feature {
 	if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
 		then exit;
 	fi
-	echo ${OPTIONLIST[$CHOICE]}
-	add ${OPTIONLIST[$CHOICE]}
+	FEATURE_CHOOSEN=${OPTIONLIST[$CHOICE]}
+	echo "Found: $FEATURE_CHOOSEN"
+}
+
+function checkoutfeature {
+	findfeature
+	git checkout -b ${FEATURE_CHOOSEN##*/} $FEATURE_CHOOSEN
+}
+
+function feature {
+	findfeature $1
+	add $FEATURE_CHOOSEN
 	status
 }
 
 function add {
-	FEAUTURE_BRANCH=$1
+	BRANCH_TO_ADD=$1
 	CURRENT_RELEASE=$(current)
 	if [ -z "CURRENT_RELEASE" ]
 		then
 		echo "No Release is Initialized"
 		exit 1;
 	fi
-	git config --add releases.branches $FEAUTURE_BRANCH
+	git config --add releases.branches $BRANCH_TO_ADD
 }
 
 function remove {
@@ -382,6 +385,13 @@ function status {
 		echo "  No Release Found: run 'git release init' to setup release"
 		echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = "
 		echo " "
+	fi
+
+	IN_BRANCH_CMD="git branch --merged master | grep $(releasebranch)"
+	IN_MASTER=`$IN_BRANCH_CMD`
+	if [ -z "$IN_MASTER" ]
+		then echo "Status: Not merged into Master"
+		else echo "Status: MERGED INTO MASTER"
 	fi
 	echo "Current Release: $(current)"
 	echo "Release Branch:  $(releasebranch)"
@@ -447,6 +457,7 @@ if [ -z "$COMMAND" ]
 	echo "        - use 'git release dump' deletes release branch and rollsback the candidate version."
 	echo "        - use 'git release checkout' displays a list of release branches, allows for switching from release to release"
 	echo "        - use 'git release devbranches' to list out branches that are contained in the development branch, that are not yet on master"
+	echo "        - use 'git release checkoutfeature' to find and create local branch from remote feature branch"
 	echo " "
 	echo "  2. Manual :: 'git originalcreate [release-file]' stores the release versioning information in a simple file on the disk"
 	echo "        - Release file sits on root of repo, and contains list of branches, one branch per line."
