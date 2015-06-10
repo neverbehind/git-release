@@ -151,6 +151,13 @@ function deploy {
 	git checkout master
 	git merge --no-ff --no-edit $RELEASE_BRANCH
 	git push origin master
+	tag
+}
+
+function tag {
+	RELEASE_TAG="v$(version)"
+	git tag $RELEASE_TAG
+	git push --tags
 }
 
 function devbranches {
@@ -168,6 +175,16 @@ function devbranches {
 	comm -12 <(git branch -r --no-merged master) <(git branch -r --merged $DEV_BRANCH) | grep -v $DEV_BRANCH | grep -v release	
 }
 
+# -- Experimental Dev Branch Refresh Mechanism
+# -- Uses hard resets to make the dev branch more portable, tagging could also be employed 
+function refreshdevbranch {
+	PREV_DEVBRANCH="$(devbranch)-prev"
+	git checkout -b $PREV_DEVBRANCH || git checkout $PREV_DEVBRANCH
+	git reset --hard $(devbranch)
+	git checkout $(devbranch)
+	git reset --hard $(releasebranch)
+}
+
 function cleanrelease {
 	CURRENT_RELEASE=$1
 	if [ -z "$CURRENT_RELEASE" ]
@@ -175,7 +192,7 @@ function cleanrelease {
 	fi
 	
 	echo "Looking for Old Release Branches for $CURRENT_RELEASE..."
-	OLD_RELEASES=`git branch -r --no-merged | grep $CURRENT_RELEASE`
+	OLD_RELEASES=`git branch -r | grep $CURRENT_RELEASE | grep -v $(releasebranch)`
 	
 	if [ -z "$OLD_RELEASES" ]
 	then 
@@ -250,6 +267,7 @@ function dump {
 
 function edit {
 	nano $(current)
+	readinreleasefile
 }
 
 function writeout {
@@ -363,6 +381,10 @@ function candidate {
 	git config --get-all releases.candidate
 }
 
+function version {
+	git config --get-all releases.version
+}
+
 function current {
 	# "Used to list the release info"
 	git config --get-all releases.current
@@ -385,6 +407,7 @@ function status {
 		echo "  No Release Found: run 'git release init' to setup release"
 		echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = "
 		echo " "
+		exit
 	fi
 
 	IN_BRANCH_CMD="git branch --merged master | grep $(releasebranch)"
@@ -454,6 +477,7 @@ if [ -z "$COMMAND" ]
 	echo "             + Merges in each of the added feature branches"
 	echo "        - use 'git release append' similar to roll, but doesn't create a new release branch, simple remerges all branches into the current RC"
 	echo "        - use 'git release next' similar to roll, but uses current release branch as the base branch, instead of master"
+	echo "        - use 'git release deploy' checkout master, and merge in release branch and tag commit with release tag."
 	echo "        - use 'git release dump' deletes release branch and rollsback the candidate version."
 	echo "        - use 'git release checkout' displays a list of release branches, allows for switching from release to release"
 	echo "        - use 'git release devbranches' to list out branches that are contained in the development branch, that are not yet on master"
