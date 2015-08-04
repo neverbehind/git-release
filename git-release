@@ -32,7 +32,7 @@ function init {
 }
 
 function checkout {
-
+	git remote update
 	echo "Looking for Release Branches..."
 	AVAIL_RELEASES=`git branch -r | grep origin/release-v`
 	
@@ -169,15 +169,30 @@ function devbranches {
 			read DEV_BRANCH
 			git config --local --replace-all releases.devbranch $DEV_BRANCH
 	fi
-	git checkout $DEV_BRANCH
-	git pull
-	git remote update
+	NOOUTPUT=`git checkout $DEV_BRANCH && git pull`
+	NOOUTPUT=`git remote update`
 	comm -12 <(git branch -r --no-merged master) <(git branch -r --merged $DEV_BRANCH) | grep -v $DEV_BRANCH | grep -v release	
 }
 
+## Lab -- Expiremental Functions
+
+# -- Grab All Dev Branches and Add them to a new release
+function createdevrelease {
+	echo "Enter Current Release Number:"
+	read RELEASE_NUMBER
+	init "$RELEASE_NUMBER-devrefresh" 0
+	DEV_BRANCHES=$(devbranches)
+	for BRANCH in $DEV_BRANCHES
+	do
+		add "$BRANCH"
+	done
+	roll
+}
+
+
 # -- Experimental Dev Branch Refresh Mechanism
 # -- Uses hard resets to make the dev branch more portable, tagging could also be employed 
-function refreshdevbranch {
+function movedevbranch {
 	PREV_DEVBRANCH="$(devbranch)-prev"
 	git checkout -b $PREV_DEVBRANCH || git checkout $PREV_DEVBRANCH
 	git reset --hard $(devbranch)
@@ -186,6 +201,9 @@ function refreshdevbranch {
 }
 
 function cleanrelease {
+	git checkout master
+	git pull origin master
+
 	CURRENT_RELEASE=$1
 	if [ -z "$CURRENT_RELEASE" ]
 		then CURRENT_RELEASE=$(current)
@@ -214,7 +232,11 @@ function cleanrelease {
 }
 
 function cleanupmergedlocalbranches {
-	MERGED_BRANCHES=`git branch --merged | grep -v release | grep -v master`
+	git checkout master
+	git pull origin master
+	GREP_CMD="git branch --merged | grep -v release | grep -v master"
+	MERGED_BRANCHES=$(git branch --merged | grep -v release | grep -v master)
+	echo $MERGED_BRANCHES
 	for RMM_BRANCH in $MERGED_BRANCHES
 	do
 		echo "Pulling Branch: $RMM_BRANCH"
@@ -228,6 +250,16 @@ function cleanupmergedlocalbranches {
 }
 
 function cleanupmergedremotebranches {
+	echo "IMPORTANT: You should have the most current release branch checked out"
+	echo "IMPORTANT: You should have have already run 'git release deploy' to have master merged in"
+	echo "Are these things handled? (y)"
+	read CONFIRMATION
+	if [ "$CONFIRMATION" = "Y" ] || [ "$CONFIRMATION" = "y" ]
+		then echo "Thanks for Confirming"
+		else exit
+	fi
+	git checkout master
+	git pull origin master
 	MERGED_BRANCHES=`git branch -a --merged | grep remotes | grep -v release | grep -v master`
 	for RMM_BRANCH in $MERGED_BRANCHES
 	do
@@ -240,11 +272,21 @@ function cleanupmergedremotebranches {
 			fi 
 		if [[ $RELEASE_BRANCHES != *"$RMM_BRANCH"* ]]
 			then
-			echo "$RMM_BRANCH shows to be merged to master, removing..."
-			git push origin --delete $RMM_BRANCH_ONLY
+			echo "$RMM_BRANCH shows to be merged to master, remove? (y)" 
+			read CHOICE
+			if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
+			then 
+				git push origin --delete $RMM_BRANCH_ONLY
+			fi
 		fi
 	done
 }
+
+function purgelocalbranches {
+	git branch | grep -v master | xargs git branch -d
+}
+
+## -- End Lab
 
 function push {
 	git push origin $(releasebranch)
@@ -455,11 +497,7 @@ function originalcreate {
 	done
 }
 
-COMMAND=$1
-
-if [ -z "$COMMAND" ]
-	then 
-	status
+function help {
 	echo " "
 	echo " * * * HELP * * * * * * * * "
 	echo " "
@@ -487,7 +525,21 @@ if [ -z "$COMMAND" ]
 	echo "        - Release file sits on root of repo, and contains list of branches, one branch per line."
 	echo " "
 	echo " * * * * * * * * * * * * * * "
+	echo " "	
+}
+
+COMMAND=$1
+
+if [ -z "$COMMAND" ]
+	then 
 	echo " "
+	echo " "
+	echo " use `git release help` for more command information. "
+	echo " "
+	echo " "
+	echo " "
+	echo " use `git release status` to see what the current settings are. "
+	status
 fi
 
 $COMMAND $2 $3
