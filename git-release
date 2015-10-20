@@ -462,16 +462,22 @@ function status {
 	IN_BRANCH_CMD="git branch --merged master | grep $(releasebranch)"
 	IN_MASTER=`$IN_BRANCH_CMD`
 	if [ -z "$IN_MASTER" ]
-		then echo "Status: Not merged into Master"
-		else echo "Status: MERGED INTO MASTER"
+		then echo "Status: Pending (Not merged into Master)"
+		else echo "Status: Deployed (Merged into Master)"
 	fi
 	echo "Current Release: $(current)"
 	echo "Release Branch:  $(releasebranch)"
-	echo "Branches in this Release: $(releasebranch)"
+	echo "Branches in this Release:"
 	for BRANCH in $(branches)
 	do
 		echo " ++ $BRANCH"
 	done
+
+	echo "Branches in release not in Master:"
+	for UNMERGED_BRANCH in $(releasebranches)
+	do
+		echo "$UNMERGED_BRANCH"
+	done	
 }
 
 #depreciated
