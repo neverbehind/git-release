@@ -477,6 +477,7 @@ function status {
 	for UNMERGED_BRANCH in $(releasebranches)
 	do
 		echo "$UNMERGED_BRANCH"
+		git rev-parse "$UNMERGED_BRANCH"
 	done	
 }
 
