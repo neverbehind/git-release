@@ -476,8 +476,8 @@ function status {
 	echo "Branches in release not in Master:"
 	for UNMERGED_BRANCH in $(releasebranches)
 	do
-		echo "$UNMERGED_BRANCH"
-		git rev-parse "$UNMERGED_BRANCH"
+		COMMIT=`git rev-parse "$UNMERGED_BRANCH"`
+		echo "$UNMERGED_BRANCH @ $COMMIT"
 	done	
 }
 
