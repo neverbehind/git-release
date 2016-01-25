@@ -169,9 +169,44 @@ function devbranches {
 			read DEV_BRANCH
 			git config --local --replace-all releases.devbranch $DEV_BRANCH
 	fi
-	NOOUTPUT=`git checkout $DEV_BRANCH && git pull`
-	NOOUTPUT=`git remote update`
+	NOOUTPUT=`git checkout $DEV_BRANCH && git pull origin $DEV_BRANCH && git remote update`
 	comm -12 <(git branch -r --no-merged master) <(git branch -r --merged $DEV_BRANCH) | grep -v $DEV_BRANCH | grep -v release	
+}
+
+function devfeature {
+	DEV_BRANCH=$(devbranch)
+	#git checkout $DEV_BRANCH
+	#git pull origin $DEV_BRANCH
+	NOOUTPUT=`git checkout $DEV_BRANCH && git pull origin $DEV_BRANCH && git remote update`
+	FEAUTURE_BRANCH=$1
+	if [ -z "$FEAUTURE_BRANCH" ]
+	then
+		echo "Enter part of a Feature Branch name: (we will search for it) "
+		read FEAUTURE_BRANCH
+	fi
+	BRANCHES=`git branch -a | grep $FEAUTURE_BRANCH`
+	OPTION=0
+	OPTIONLIST=()
+	echo "Branches Found:"
+	for BRANCH in $BRANCHES
+	do
+		echo "$OPTION $BRANCH"
+		OPTIONLIST[OPTION]=$BRANCH
+		OPTION=$((OPTION+1))
+	done
+	echo "Select Branch to Add: (X = cancel)"
+	read CHOICE
+	if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
+		then exit;
+	fi
+	echo "Merging ${OPTIONLIST[$CHOICE]} into $DEV_BRANCH"
+	git merge --no-ff --no-edit ${OPTIONLIST[$CHOICE]}
+	echo "Push [$DEV_BRANCH] up to Origin?"
+	read PUSH
+	if [ "$PUSH" = "y" ] || [ "$PUSH" = "Y" ]
+		then
+		git push origin $DEV_BRANCH
+	fi
 }
 
 function releasebranches {
@@ -398,13 +433,35 @@ function add {
 	git config --add releases.branches $BRANCH_TO_ADD
 }
 
+function rm {
+	RM_BRANCHES=$(branches)
+	OPTION=0
+	OPTIONLIST=()
+	echo "Branches Found:"
+	for BRANCH in $RM_BRANCHES
+	do
+		echo "$OPTION $BRANCH"
+		OPTIONLIST[OPTION]=$BRANCH
+		OPTION=$((OPTION+1))
+	done
+	echo "Select Branch to Remove: (X = cancel)"
+	read CHOICE
+	if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
+		then exit;
+	fi
+	RM_BRANCH_CHOOSEN=${OPTIONLIST[$CHOICE]}
+
+	remove $RM_BRANCH_CHOOSEN
+
+}
+
 function remove {
 	RM_FEAUTURE_BRANCH=$1
 	RM_BRANCHES=$(branches)
 	clearbranches
 	for RM_BRANCH in $RM_BRANCHES
 	do
-		if [ "$1" != "$RM_BRANCH" ]
+		if [ "$RM_FEAUTURE_BRANCH" != "$RM_BRANCH" ]
 			then
 			add $RM_BRANCH
 		fi
@@ -424,6 +481,12 @@ function nextcandidate {
 	RELEASE_CANDIDATE=`git config --get-all releases.candidate`
 	git config --local --replace-all releases.candidate "$((RELEASE_CANDIDATE+1))"
 	echo "$((RELEASE_CANDIDATE+1))"
+}
+
+function setcandidate {
+	RELEASE_CANDIDATE=$1
+	git config --local --replace-all releases.candidate $RELEASE_CANDIDATE
+	echo "Release Candidate set to: $RELEASE_CANDIDATE"
 }
 
 function candidate {
@@ -472,6 +535,11 @@ function status {
 	do
 		echo " ++ $BRANCH"
 	done
+
+}
+
+function deploystatus {
+	status
 
 	echo "Branches in release not in Master:"
 	for UNMERGED_BRANCH in $(releasebranches)
