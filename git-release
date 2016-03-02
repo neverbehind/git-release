@@ -78,9 +78,11 @@ function roll {
 
 	git checkout -b $RELEASE_BRANCH master
 
+	migratereleases
+
 	writereleasefile
 
-	git add $(current)
+	git add "releases/$(current)"
 
 	git commit -m "Adding Release Branch Definition file"
 
@@ -100,7 +102,7 @@ function next {
 
 	writereleasefile
 
-	git add $(current)
+	git add "releases/$(current)"
 
 	git commit -m "Appending Release Branch Definition file"
 
@@ -121,7 +123,7 @@ function append {
 
 	writereleasefile
 
-	git add $(current)
+	git add "releases/$(current)"
 
 	git commit -m "Appending Release Branch Definition file"
 
@@ -350,7 +352,7 @@ function dump {
 }
 
 function edit {
-	nano $(current)
+	nano "releases/$(current)"
 	readinreleasefile
 }
 
@@ -360,10 +362,10 @@ function writeout {
 }
 
 function writereleasefile {
-	echo "" > $(current)
+	echo "" > "releases/$(current)"
 	for BRANCH in $(branches)
 	do
-	    echo $BRANCH >> $(current)
+	    echo $BRANCH >> "releases/$(current)"
 	done	
 }
 
@@ -373,12 +375,35 @@ function readin {
 
 function readinreleasefile {
 	clearbranches
-	for BRANCH in `cat $(current)`
+	for BRANCH in `cat releases/$(current) $(current)`
 	do
 	    add $BRANCH
 	done
 	git reset --hard
 	status
+}
+
+function migratereleases {
+	mkdir releases
+	if [ -! -f releases/.htaccess ]
+	then
+		echo "Order deny,allow" > "releases/.htaccess"
+		echo "Deny from all" >> "releases/.htaccess"
+		git add "releases/.htaccess"
+	fi
+
+	COMMIT=0
+	for RELEASE_FILE in `ls release-v*`
+	do
+		echo "Moving Release File: $RELEASE_FILE to releases folder." 
+	    mv $RELEASE_FILE releases/
+	    git add "releases/$RELEASE_FILE"
+	    COMMIT=$((COMMIT+1))
+	done
+	if [ "$COMMIT" -gt "0" ]
+	then
+		git commit -m "Migrate Releases"
+	fi
 }
 
 function clearbranches {
