@@ -385,7 +385,7 @@ function readinreleasefile {
 
 function migratereleases {
 	mkdir releases
-	if [ -! -f releases/.htaccess ]
+	if [ ! -f "releases/.htaccess" ]
 	then
 		echo "Order deny,allow" > "releases/.htaccess"
 		echo "Deny from all" >> "releases/.htaccess"
@@ -398,6 +398,7 @@ function migratereleases {
 		echo "Moving Release File: $RELEASE_FILE to releases folder." 
 	    mv $RELEASE_FILE releases/
 	    git add "releases/$RELEASE_FILE"
+	    git rm $RELEASE_FILE
 	    COMMIT=$((COMMIT+1))
 	done
 	if [ "$COMMIT" -gt "0" ]
