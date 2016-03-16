@@ -2,7 +2,12 @@
 
 Create release candidate branches with ease! `:)`
 
-Under the hood `git release` uses the git config system to store lists of branches, and created release files that store the branch list for you.
+Under the hood `git release` uses the git config system to store lists of branches, and creates release files that store the branch list for you.
+
+
+*Install:*
+* Checkout Repo
+* `cp /path/to/repo/git-release /local/path/dir/` (Copy the git-release executable to a PATH dir, so you can use it globally) 
 
 *Quick Start:*
 * `cd /to/repo`
@@ -10,7 +15,8 @@ Under the hood `git release` uses the git config system to store lists of branch
 * `git release feature [partial branch name]`
 * `git release roll`
 
-List of Commands:
+
+*List of Commands:*
 - `git release init [version] [candidate]` to configure release versions
 - `git release add [full remote branch path]` to add feature branches into the list to release
 - `git release feature [branch search string]` to search for and add feature branches into the list to release
