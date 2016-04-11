@@ -8,10 +8,12 @@ Under the hood `git release` uses the git config system to store lists of branch
 *Install:*
 * Checkout Repo
 * `cp /path/to/repo/git-release /local/path/dir/` (Copy the git-release executable to a PATH dir, so you can use it globally) 
-** OSX - copy to `~/bin` which automatically adds to PATH, open a new terminal window.
+ * OSX - copy to `~/bin` which automatically adds to PATH, open a new terminal window.
 
 *Quick Start:*
-Most Common Process: Initialize release, add features, then create a the release by merging all branches in.
+
+> Most Common Process: Initialize release, add features, then create a the release by merging all branches in.
+
 * `cd /to/repo`
 * `git release init v0.0.0 0`
 * `git release feature [partial branch name]`
