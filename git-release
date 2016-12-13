@@ -227,6 +227,17 @@ function append {
 	fi
 }
 
+# -- Grab All Dev Branches and Add them to a new release
+function duplicate {
+	RELEASE_BRANCHES=$(releasebranches)
+	init
+	for BRANCH in $RELEASE_BRANCHES
+	do
+		add "$BRANCH"
+	done
+	status
+}
+
 # -- merge the added feature branches into the currently checked out branch
 function mergebranches {
 	fetchall
@@ -801,7 +812,6 @@ function createdevrelease {
 	roll
 }
 
-
 # -- Experimental Dev Branch Refresh Mechanism
 # -- Uses hard resets to make the dev branch more portable, tagging could also be employed 
 function movedevbranch {
@@ -1103,7 +1113,7 @@ function trimfeaturename {
 # -- initiates feature search and calls add
 function feature {
 	findfeature $1
-	add $FEATURE_CHOSEN
+	add "${FEATURE_CHOSEN#*/}"
 	status
 }
 
@@ -1287,6 +1297,9 @@ function deploystatus {
 	echo "Branches in release not in $(masterbranch):"
 	for UNMERGED_BRANCH in $(releasebranches)
 	do
+		if [ "$UNMERGED_BRANCH" == "Fetching" ]
+			then continue
+		fi
 		COMMIT=`git rev-parse "$UNMERGED_BRANCH"`
 		echo "$UNMERGED_BRANCH @ $COMMIT"
 	done	
