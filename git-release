@@ -241,6 +241,9 @@ function duplicate {
 # -- merge the added feature branches into the currently checked out branch
 function mergebranches {
 	fetchall
+	# Updating master from any updates
+	git merge --no-ff --no-edit origin/master
+
 	for BRANCH in $(branches)
 	do
 		echo "MERGING: $BRANCH ++++++++++++++++++++++++"
@@ -308,13 +311,66 @@ function stage {
 
 # -- merge the current release candidate into master branch
 function deploy {
+	DEPLOY_ENV=$1
+	RELEASE_BRANCH=$(releasebranch)
+
+	fetchall
+
+	if [ -z "$DEPLOY_ENV" ]
+		then
+		echo "Enter Deploy Environment (dev/stage/prod)"
+		read DEPLOY_ENV
+	fi
+	if [ "$DEPLOY_ENV" = "prod" ]
+		then
+		TRUNK_BRANCH=$(masterbranch)
+	fi
+	if [ "$DEPLOY_ENV" = "stage" ]
+		then
+		TRUNK_BRANCH=$(stagebranch)
+	fi
+	if [ "$DEPLOY_ENV" = "dev" ]
+		then
+		TRUNK_BRANCH=$(devbranch)
+	fi
+
+	git checkout $TRUNK_BRANCH
+
+	if [ "$DEPLOY_ENV" = "prod" ]
+		then
+		git pull origin $TRUNK_BRANCH
+	else 
+		git reset --hard $(masterbranch)
+	fi
+
+	git merge --no-ff --no-edit $RELEASE_BRANCH
+	git push origin $TRUNK_BRANCH -f
+
+	if [ "$DEPLOY_ENV" = "prod" ]
+		then
+		tag
+	fi
+}
+
+# -- merge the current release candidate into arbitary branch
+function merge {
+	MERGE_TO_BRANCH=$1
 	RELEASE_BRANCH=$(releasebranch)
 	fetchall
-	git checkout $(masterbranch)
-	git pull origin $(masterbranch)
+	git checkout $MERGE_TO_BRANCH
+	git pull origin $MERGE_TO_BRANCH
 	git merge --no-ff --no-edit $RELEASE_BRANCH
-	git push origin $(masterbranch)
-	tag
+	git push origin $MERGE_TO_BRANCH
+
+	if [ "$MERGE_TO_BRANCH" = "master" ]
+		then
+		echo "It's customary to Tag when merging to master, shall we tag with release? (y/n)"
+		read PUSH
+		if [ "$PUSH" = "y" ] || [ "$PUSH" = "Y" ]
+			then
+			tag
+		fi
+	fi
 }
 
 # -- tags master branch with the latest version
@@ -327,6 +383,7 @@ function tag {
 # -- List the feature branches currently merged into the development branch
 function devbranches {
 	DEV_BRANCH=$(devbranch)
+	MASTER_BRANCH=$(masterbranch)
 	if [ -z "$DEV_BRANCH" ]
 		then 
 			echo "There is no development branch configured (in git config --local releases.devbranch)..."
@@ -335,8 +392,9 @@ function devbranches {
 			git config --local --replace-all releases.devbranch $DEV_BRANCH
 	fi
 	fetchall
+	NOOUTPUT=`git checkout -b $MASTER_BRANCH origin/$MASTER_BRANCH && git pull origin $MASTER_BRANCH`
 	NOOUTPUT=`git checkout $DEV_BRANCH && git pull origin $DEV_BRANCH`
-	comm -12 <(git branch -r --no-merged $(masterbranch)) <(git branch -r --merged $DEV_BRANCH) | grep -v $DEV_BRANCH | grep -v release	
+	comm -12 <(git branch -r --no-merged $MASTER_BRANCH) <(git branch -r --merged $DEV_BRANCH) | grep -v $DEV_BRANCH | grep -v release	
 }
 
 # -- configure the url to call after merging a feature into develop branch
@@ -822,6 +880,30 @@ function movedevbranch {
 	git reset --hard $(releasebranch)
 }
 
+function cleanup {
+	echo "Did we want to clean up the release branches?"
+	read CHOICE
+	if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
+		then 
+		cleanrelease
+	fi
+
+	echo "Did we want to purge the local merged branches?"
+	read CHOICE
+	if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
+		then 
+		cleanupmergedlocalbranches
+	fi
+
+	echo "Did we want to purge the remote merged branches?"
+	read CHOICE
+	if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
+		then 
+		cleanupmergedremotebranches
+	fi
+
+}
+
 # -- lists old releases and allows you to remove them from origin and local
 function cleanrelease {
 	git checkout $(masterbranch)
@@ -838,43 +920,51 @@ function cleanrelease {
 	if [ -z "$OLD_RELEASES" ]
 	then 
 		echo "No Old Release branches found"
-		exit;
+	else
+		for OLD_RELEASE_BRANCH in $OLD_RELEASES
+		do
+			RELEASE_ONLY=${OLD_RELEASE_BRANCH##*/}
+		    echo "Remove: $RELEASE_ONLY (y/n)"
+		    read CHOICE
+		    if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
+			then 
+				git push origin --delete $RELEASE_ONLY
+				git branch -D $RELEASE_ONLY
+			fi
+		done		
 	fi
 
-	for OLD_RELEASE_BRANCH in $OLD_RELEASES
-	do
-		RELEASE_ONLY=${OLD_RELEASE_BRANCH##*/}
-	    echo "Remove: $RELEASE_ONLY (y/n)"
-	    read CHOICE
-	    if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
-		then 
-			git push origin --delete $RELEASE_ONLY
-			git branch -D $RELEASE_ONLY
-		fi
-	done
 }
 
 # -- allows you to remove local branches that have been merged into master branch
 function cleanupmergedlocalbranches {
+	CHOICE="n"
 	git checkout $(masterbranch)
 	git pull origin $(masterbranch)
 	GREP_CMD="git branch --merged | grep -v release | grep -v $(masterbranch)"
-	MERGED_BRANCHES=`git branch --merged | grep -v release | grep -v $(masterbranch) | grep -v $(stagebranch) | grep -v $(devbranch)`
+	MERGED_BRANCHES=`git branch --merged | grep -v $(masterbranch) | grep -v $(stagebranch) | grep -v $(devbranch)`
 	echo $MERGED_BRANCHES
 	for RMM_BRANCH in $MERGED_BRANCHES
 	do
 		echo "Pulling Branch: $RMM_BRANCH"
-		echo "$RMM_BRANCH shows to be merged to master branch, remove? (y/n)"
-		read CHOICE
-		if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
-		then 
+		if [ "$CHOICE" = "auto" ]
+			then
+			echo "Removing $RMM_BRANCH"
 			git branch -d $RMM_BRANCH
+		else
+			echo "$RMM_BRANCH shows to be merged to master branch, remove? (y/n)"
+			read CHOICE
+			if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ] || [ "$CHOICE" = "auto" ]
+			then 
+				git branch -d $RMM_BRANCH
+			fi
 		fi
 	done
 }
 
 # -- allows you to remove remote branches that have been merged into master branch
 function cleanupmergedremotebranches {
+	CHOICE="n"
 	echo "IMPORTANT: You should have the most current release branch checked out"
 	echo "IMPORTANT: You should have have already run 'git release deploy' to have master branch merged in"
 	echo "Are these things handled? (y/n)"
@@ -885,23 +975,28 @@ function cleanupmergedremotebranches {
 	fi
 	git checkout master
 	git pull origin master
-	MERGED_BRANCHES=`git branch -a --merged | grep remotes | grep -v release | grep -v $(masterbranch)`
+	MERGED_BRANCHES=`git branch -a --merged | grep remotes | grep -v $(masterbranch)`
 	for RMM_BRANCH in $MERGED_BRANCHES
 	do
 		echo "Pulling Branch: $RMM_BRANCH"
-		RMM_BRANCH_ONLY=${RMM_BRANCH##*/}
+		RMM_BRANCH_ONLY=${RMM_BRANCH#*remotes/origin/}
 		RELEASE_BRANCHES=$(branches)
 		if [[ $RELEASE_BRANCHES == *"$RMM_BRANCH"* ]]
 			then
 				echo "Found in current release !!! $RMM_BRANCH"
-			fi 
+		fi 
 		if [[ $RELEASE_BRANCHES != *"$RMM_BRANCH"* ]]
 			then
-			echo "$RMM_BRANCH shows to be merged to master branch, remove? (y)" 
-			read CHOICE
-			if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
-			then 
+			if [ "$CHOICE" = "auto" ]
+				then
 				git push origin --delete $RMM_BRANCH_ONLY
+			else
+				echo "$RMM_BRANCH_ONLY shows to be merged to master branch, remove? (y)" 
+				read CHOICE
+				if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ] || [ "$CHOICE" = "auto" ]
+					then 
+					git push origin --delete $RMM_BRANCH_ONLY	
+				fi
 			fi
 		fi
 	done
@@ -913,6 +1008,10 @@ function purgelocalbranches {
 }
 
 ## -- End Lab
+
+function reset {
+	git reset --hard
+}
 
 # -- push the release branch to origin
 function push {
@@ -1243,10 +1342,34 @@ function masterbranch {
 	echo "$MASTER_BRANCH"
 }
 
-# -- util - get the name of the master branch
+# -- util - set the name of the master branch
 function setmasterbranch {
 	MASTER_BRANCH=$1
 	git config --local --replace-all releases.masterbranch "$MASTER_BRANCH"
+}
+
+# -- util - get the name of the master branch
+function stagebranch {
+	STAGE_BRANCH=`git config --get-all releases.stagebranch`
+	if [ -z "$STAGE_BRANCH" ]
+		then
+		git config --local --replace-all releases.stagebranch "staging"
+		STAGE_BRANCH=`git config --get-all releases.stagebranch`
+	fi
+	echo "$STAGE_BRANCH"
+}
+
+# -- util - set the name of the master branch
+function setstagebranch {
+	STAGE_BRANCH=$1
+	git config --local --replace-all releases.stagebranch "$STAGE_BRANCH"
+}
+
+
+# -- util - get the name of the master branch
+function setdevelopbranch {
+	DEVELOP_BRANCH=$1
+	git config --local --replace-all releases.devbranch "$DEVELOP_BRANCH"
 }
 
 FETCHED_ALL=false
