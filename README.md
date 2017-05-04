@@ -2,6 +2,8 @@
 
 Create release candidate branches with ease! `:)`
 
+Original Motivation: http://nvie.com/posts/a-successful-git-branching-model/
+
 Under the hood `git release` uses the git config system to store lists of branches, and creates release files that store the branch list for you.
 
 
