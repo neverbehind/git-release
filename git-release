@@ -242,7 +242,7 @@ function duplicate {
 function mergebranches {
 	fetchall
 	# Updating master from any updates
-	git merge --no-ff --no-edit origin/master
+	git merge --no-ff --no-edit origin/$(masterbranch)
 
 	for BRANCH in $(branches)
 	do
@@ -362,9 +362,9 @@ function merge {
 	git merge --no-ff --no-edit $RELEASE_BRANCH
 	git push origin $MERGE_TO_BRANCH
 
-	if [ "$MERGE_TO_BRANCH" = "master" ]
+	if [ "$MERGE_TO_BRANCH" = "$(masterbranch)" ]
 		then
-		echo "It's customary to Tag when merging to master, shall we tag with release? (y/n)"
+		echo "It's customary to Tag when merging to $(masterbranch), shall we tag with release? (y/n)"
 		read PUSH
 		if [ "$PUSH" = "y" ] || [ "$PUSH" = "Y" ]
 			then
@@ -973,8 +973,8 @@ function cleanupmergedremotebranches {
 		then echo "Thanks for Confirming"
 		else exit
 	fi
-	git checkout master
-	git pull origin master
+	git checkout $(masterbranch)
+	git pull origin $(masterbranch)
 	MERGED_BRANCHES=`git branch -a --merged | grep remotes | grep -v $(masterbranch)`
 	for RMM_BRANCH in $MERGED_BRANCHES
 	do
@@ -1399,10 +1399,10 @@ function status {
 		then echo "Status: Pending (Not merged into $(masterbranch))"
 		else echo "Status: Deployed (Merged into Master)"
 	fi
-	
+
+	echo "Master Branch: $(masterbranch)"
+	echo "Staging Branch: $(stagebranch)"	
 	echo "Development Branch: $(devbranch)"
-	
-	echo "Staging Branch: $(stagebranch)"
 		
 	echo "Current Release: $(current)"
 	echo "Release Branch:  $(releasebranch)"
