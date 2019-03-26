@@ -40,3 +40,6 @@ Under the hood `git release` uses the git config system to store lists of branch
 - `git release checkout` displays a list of release branches, allows for switching from release to release
 - `git release devbranches` to list out branches that are contained in the development branch, that are not yet on master
 - `git release checkoutfeature` to find and create local branch from remote feature branch
+
+*Helpful Tools*
+- Versioning other systems can be achieved by adding a `afterversioncommit.sh` file to the repo, this file is executed after the version file is created, and committed to the repo. This is helpful for projects that use NPM packager, or composer, and you want to set the version in a package.json or composer.json file. 
