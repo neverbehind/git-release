@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ## Install the latest git release tool into the zshell profile.
-
+mkdir -p ~/bin
 curl https://raw.githubusercontent.com/neverbehind/git-release/master/git-release -o ~/bin/git-release
  
 chmod +x ~/bin/git-release 
