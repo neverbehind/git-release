@@ -5,14 +5,14 @@ function init {
 	if [ -z "$RELEASE_VERSION" ]
 	then
 		echo "Enter Release Version (e.g. 16_07 or 1.0.0):"
-		read RELEASE_VERSION
+		read -r RELEASE_VERSION
 	fi
 
 	RELEASE_CANDIDATE=$2
 	if [ -z "$RELEASE_CANDIDATE" ]
 	then
 		echo "Enter Release Candidate Version (e.g. 1,2,3... or blank for 0, first roll will be 1):"
-		read RELEASE_CANDIDATE
+		read -r RELEASE_CANDIDATE
 	fi
 
 	if [ -z "$RELEASE_CANDIDATE" ]
@@ -20,7 +20,7 @@ function init {
 		RELEASE_CANDIDATE="0"
 	fi
 
-	git config --local --replace-all releases.version $RELEASE_VERSION
+	git config --local --replace-all releases.version "$RELEASE_VERSION"
 	git config --local --replace-all releases.candidate $RELEASE_CANDIDATE
 
 	RELEASE="release-v$RELEASE_VERSION"
@@ -40,11 +40,11 @@ function checkout {
 	if [ -z "$LATEST" ]
 	then
 		echo "Looking for Release Branches..."
-		AVAIL_RELEASES=`git branch -r | grep origin/release-v`
+		AVAIL_RELEASES=$(git branch -r | grep origin/release-v)
 	else
 		echo "Looking for Release Branches Matching $(current)"
 		echo "git branch -r | grep origin/$(current)"
-		AVAIL_RELEASES=`git branch -r | grep origin/$(current)`
+		AVAIL_RELEASES=$(git branch -r | grep origin/$(current))
 	fi
 
 	if [ -z "$AVAIL_RELEASES" ]
@@ -85,7 +85,7 @@ function checkout {
 	if [ -z "$LATEST" ]
 	then
 		echo "Select Branch to Add: (X = cancel)"
-		read CHOICE
+		read -r CHOICE
 		if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
 			then exit;
 		fi
@@ -107,9 +107,9 @@ function checkout {
 
 	echo "Initializing Version: $RELEASE_VERSION rc: $RELEASE_CANDIDATE..."
 
-	init $RELEASE_VERSION $RELEASE_CANDIDATE
+	init "$RELEASE_VERSION" "$RELEASE_CANDIDATE"
 
-	git checkout $RELEASE_BRANCH
+	git checkout "$RELEASE_BRANCH"
 	readinreleasefile
 	return 0
 }
@@ -123,7 +123,7 @@ function roll {
 
 	echo "Creating $RELEASE_BRANCH..."
 
-	git checkout -b $RELEASE_BRANCH $(masterbranch)
+	git checkout -b "$RELEASE_BRANCH" "$(masterbranch)"
 
 	migratereleases
 
@@ -137,7 +137,7 @@ function roll {
 
 	git commit -m "Adding Release Branch Definition file"
 
-    afterversioncommit
+  afterversioncommit
 
 	mergebranches
 
@@ -150,7 +150,7 @@ function roll {
 	else
 		echo "Pushing to origin"
 		echo "git push origin $RELEASE_BRANCH"
-		git push origin $RELEASE_BRANCH
+		git push origin "$RELEASE_BRANCH"
 		return 0
 	fi
 }
@@ -163,7 +163,7 @@ function next {
 
 	echo "Creating $RELEASE_BRANCH..."
 
-	git checkout -b $NEXT_RELEASE_BRANCH $RELEASE_BRANCH
+	git checkout -b "$NEXT_RELEASE_BRANCH" "$RELEASE_BRANCH"
 
 	writereleasefile
 
@@ -175,7 +175,7 @@ function next {
 
 	git commit -m "Appending Release Branch Definition file"
 
-    afterversioncommit
+  afterversioncommit
 
 	mergebranches
 
@@ -188,7 +188,7 @@ function next {
 	else
 		echo "Pushing to origin"
 		echo "git push origin $NEXT_RELEASE_BRANCH"
-		git push origin $NEXT_RELEASE_BRANCH
+		git push origin "$NEXT_RELEASE_BRANCH"
 		return 0
 	fi
 }
@@ -200,9 +200,9 @@ function append {
 
 	echo "Creating $RELEASE_BRANCH..."
 
-	git checkout -b $RELEASE_BRANCH $(masterbranch)
+	git checkout -b "$RELEASE_BRANCH" "$(masterbranch)"
 
-	git checkout $RELEASE_BRANCH
+	git checkout "$RELEASE_BRANCH"
 
 	writereleasefile
 
@@ -214,7 +214,7 @@ function append {
 
 	git commit -m "Appending Release Branch Definition file"
 
-    afterversioncommit
+  afterversioncommit
 
 	mergebranches
 
@@ -227,7 +227,7 @@ function append {
 	else
 		echo "Pushing to origin"
 		echo "git push origin $RELEASE_BRANCH"
-		git push origin $RELEASE_BRANCH
+		git push origin "$RELEASE_BRANCH"
 		return 0
 	fi
 }
@@ -247,12 +247,12 @@ function duplicate {
 function mergebranches {
 	fetchall
 	# Updating master from any updates
-	git merge --no-ff --no-edit origin/$(masterbranch)
+	git merge --no-ff --no-edit "origin/$(masterbranch)"
 
 	for BRANCH in $(branches)
 	do
 		echo "MERGING: $BRANCH ++++++++++++++++++++++++"
-	    git merge --no-ff --no-edit $BRANCH
+	    git merge --no-ff --no-edit "$BRANCH"
 	done
 }
 
@@ -261,7 +261,7 @@ function mergebranches {
 # return 1, false if not found
 function findconflicts {
 	echo "Looking for conflicts with merge."
-	CONFLICTS=`git diff --name-only --diff-filter=U`
+	CONFLICTS=$(git diff --name-only --diff-filter=U)
 	if [ "$CONFLICTS" = "" ]
 	then
 		echo "No Conflicts Found"
@@ -282,7 +282,7 @@ function findconflicts {
 		echo "After you resolve conflicts, remember to add the file and commit the release candidate"
 		echo "git commit -a -m \"resolved conflicts\""
 		echo "once completed, push it to origin"
-		CURRENT_BRANCH=`git symbolic-ref --short HEAD`
+		CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
 		echo "git push origin $CURRENT_BRANCH"
 		echo ""
 		echo "NOTE: Once resolved, they should not cause a problem for 'next' or 'append' release builds, but if you 'roll' a new release you will have the issue again. If this happens constantly, it's recommended that you find a way to merge the two interdependent branches and add THAT to the release instead."
@@ -296,20 +296,21 @@ function stage {
 	RELEASE_BRANCH=$(releasebranch)
 	STAGE_BRANCH=$(stagebranch)
 	fetchall
-	NOOUTPUT=`git checkout $STAGE_BRANCH && git pull origin $STAGE_BRANCH`
-	git merge --no-ff --no-edit $RELEASE_BRANCH
-	git push origin $STAGE_BRANCH
+
+	NOOUTPUT=$(git checkout "$STAGE_BRANCH" && git pull origin "$STAGE_BRANCH")
+	git merge --no-ff --no-edit "$RELEASE_BRANCH"
+	git push origin "$STAGE_BRANCH"
 
 	STAGE_DEPLOY_URL=$(stagedeployurl)
 	if [ ! -z "$STAGE_DEPLOY_URL" ]
 	then
 		echo "Do you want to deploy the '$(stagebranch)' branch to the staging branch location? (y/n)"
-		read DEPLOY_IT
+		read -r DEPLOY_IT
 
 		if [ "$DEPLOY_IT" = "Y" ] || [ "$DEPLOY_IT" = "y" ]
 		then
 			echo "Sending request to ($STAGE_DEPLOY_URL)"
-			curl $STAGE_DEPLOY_URL
+			curl "$STAGE_DEPLOY_URL"
 		fi
 	fi
 }
@@ -319,20 +320,20 @@ function qa {
 	RELEASE_BRANCH=$(releasebranch)
 	QA_BRANCH=$(qabranch)
 	fetchall
-	NOOUTPUT=`git checkout $QA_BRANCH && git pull origin $QA_BRANCH`
-	git merge --no-ff --no-edit $RELEASE_BRANCH
-	git push origin $QA_BRANCH
+	NOOUTPUT=$(git checkout $QA_BRANCH && git pull origin $QA_BRANCH)
+	git merge --no-ff --no-edit "$RELEASE_BRANCH"
+	git push origin "$QA_BRANCH"
 
 	QA_DEPLOY_URL=$(qadeployurl)
 	if [ ! -z "$QA_DEPLOY_URL" ]
 	then
 		echo "Do you want to deploy the '$(qabranch)' branch to the staging branch location? (y/n)"
-		read DEPLOY_IT
+		read -r DEPLOY_IT
 
 		if [ "$DEPLOY_IT" = "Y" ] || [ "$DEPLOY_IT" = "y" ]
 		then
 			echo "Sending request to ($QA_DEPLOY_URL)"
-			curl $QA_DEPLOY_URL
+			curl "$QA_DEPLOY_URL"
 		fi
 	fi
 }
@@ -347,7 +348,7 @@ function deploy {
 	if [ -z "$DEPLOY_ENV" ]
 		then
 		echo "Enter Deploy Environment (dev/stage/qa/prod)"
-		read DEPLOY_ENV
+		read -r DEPLOY_ENV
 	fi
 	if [ "$DEPLOY_ENV" = "prod" ]
 		then
@@ -366,17 +367,17 @@ function deploy {
 		TRUNK_BRANCH=$(devbranch)
 	fi
 
-	git checkout $TRUNK_BRANCH
+	git checkout "$TRUNK_BRANCH"
 
 	if [ "$DEPLOY_ENV" = "prod" ]
 		then
-		git pull origin $TRUNK_BRANCH
+		git pull origin "$TRUNK_BRANCH"
 	else
-		git reset --hard $(masterbranch)
+		git reset --hard "$(masterbranch)"
 	fi
 
-	git merge --no-ff --no-edit $RELEASE_BRANCH
-	git push origin $TRUNK_BRANCH -f
+	git merge --no-ff --no-edit "$RELEASE_BRANCH"
+	git push origin "$TRUNK_BRANCH" -f
 
 	if [ "$DEPLOY_ENV" = "prod" ]
 		then
@@ -389,15 +390,15 @@ function merge {
 	MERGE_TO_BRANCH=$1
 	RELEASE_BRANCH=$(releasebranch)
 	fetchall
-	git checkout $MERGE_TO_BRANCH
-	git pull origin $MERGE_TO_BRANCH
-	git merge --no-ff --no-edit $RELEASE_BRANCH
-	git push origin $MERGE_TO_BRANCH
+	git checkout "$MERGE_TO_BRANCH"
+	git pull origin "$MERGE_TO_BRANCH"
+	git merge --no-ff --no-edit "$RELEASE_BRANCH"
+	git push origin "$MERGE_TO_BRANCH"
 
 	if [ "$MERGE_TO_BRANCH" = "$(masterbranch)" ]
 		then
 		echo "It's customary to Tag when merging to $(masterbranch), shall we tag with release? (y/n)"
-		read PUSH
+		read -r PUSH
 		if [ "$PUSH" = "y" ] || [ "$PUSH" = "Y" ]
 			then
 			tag
@@ -408,7 +409,7 @@ function merge {
 # -- tags master branch with the latest version
 function tag {
 	RELEASE_TAG="v$(version)"
-	git tag $RELEASE_TAG
+	git tag "$RELEASE_TAG"
 	git push --tags
 }
 
@@ -420,13 +421,13 @@ function devbranches {
 		then
 			echo "There is no development branch configured (in git config --local releases.devbranch)..."
 			echo "Enter your development branch name:"
-			read DEV_BRANCH
-			git config --local --replace-all releases.devbranch $DEV_BRANCH
+			read -r DEV_BRANCH
+			git config --local --replace-all releases.devbranch "$DEV_BRANCH"
 	fi
 	fetchall
-	NOOUTPUT=`git checkout -b $MASTER_BRANCH origin/$MASTER_BRANCH && git pull origin $MASTER_BRANCH`
-	NOOUTPUT=`git checkout $DEV_BRANCH && git pull origin $DEV_BRANCH`
-	comm -12 <(git branch -r --no-merged $MASTER_BRANCH) <(git branch -r --merged $DEV_BRANCH) | grep -v $DEV_BRANCH | grep -v release
+	NOOUTPUT=$(git checkout -b "$MASTER_BRANCH" "origin/$MASTER_BRANCH" && git pull origin "$MASTER_BRANCH")
+	NOOUTPUT=$(git checkout "$DEV_BRANCH" && git pull origin "$DEV_BRANCH")
+	comm -12 <(git branch -r --no-merged "$MASTER_BRANCH") <(git branch -r --merged "$DEV_BRANCH") | grep -v "$DEV_BRANCH" | grep -v release
 }
 
 # -- configure the url to call after merging a feature into develop branch
@@ -435,14 +436,14 @@ function setdevdeployurl {
 	if [ -z "$DEPLOY_URL" ]
 	then
 		echo "Enter the Rest URL to call to deploy the '$(devbranch)' branch. Blank to disable branch deployment."
-		read DEPLOY_URL
+		read -r DEPLOY_URL
 	fi
 
 	if [ -z "$DEPLOY_URL" ]
 	then
 		git config --local --unset-all releases.devdeployurl
 	else
-		git config --local --replace-all releases.devdeployurl $DEPLOY_URL
+		git config --local --replace-all releases.devdeployurl "$DEPLOY_URL"
 	fi
 }
 
@@ -454,27 +455,27 @@ function stagebranches {
 		then
 			echo "There is no staging branch configured (in git config --local releases.stagebranch)..."
 			echo "Enter your staging branch name:"
-			read STAGE_BRANCH
-			git config --local --replace-all releases.stagebranch $STAGE_BRANCH
+			read -r STAGE_BRANCH
+			git config --local --replace-all releases.stagebranch "$STAGE_BRANCH"
 	fi
 	fetchall
-	NOOUTPUT=`git checkout $STAGE_BRANCH && git pull origin $STAGE_BRANCH`
-	comm -12 <(git branch -r --no-merged $(masterbranch)) <(git branch -r --merged $STAGE_BRANCH) | grep -v $STAGE_BRANCH | grep -v release
+	NOOUTPUT=$(git checkout "$STAGE_BRANCH" && git pull origin "$STAGE_BRANCH")
+	comm -12 <(git branch -r --no-merged "$(masterbranch)") <(git branch -r --merged "$STAGE_BRANCH") | grep -v "$STAGE_BRANCH" | grep -v release
 }
 
 # -- list the feature branches currently merged into the staging branch
 function qabranches {
 	QA_BRANCH=$(qabranch)
-	if [ -z "QA_BRANCH" ]
+	if [ -z "$QA_BRANCH" ]
 		then
 			echo "There is no QA branch configured (in git config --local releases.qabranch)..."
 			echo "Enter your QA branch name:"
-			read QA_BRANCH
+			read -r QA_BRANCH
 			git config --local --replace-all releases.qabranch $QA_BRANCH
 	fi
 	fetchall
-	NOOUTPUT=`git checkout $QA_BRANCH && git pull origin $QA_BRANCH`
-	comm -12 <(git branch -r --no-merged $(masterbranch)) <(git branch -r --merged $QA_BRANCH) | grep -v $QA_BRANCH | grep -v release
+	NOOUTPUT=$(git checkout "$QA_BRANCH" && git pull origin "$QA_BRANCH")
+	comm -12 <(git branch -r --no-merged "$(masterbranch)") <(git branch -r --merged "$QA_BRANCH") | grep -v "$QA_BRANCH" | grep -v release
 }
 
 # -- configure the url to call after merging a feature into staging/qa branch
@@ -483,14 +484,14 @@ function setstagedeployurl {
 	if [ -z "$DEPLOY_URL" ]
 	then
 		echo "Enter the Rest URL to call to deploy the '$(stagebranch)' branch. Blank to disable branch deployment."
-		read DEPLOY_URL
+		read -r DEPLOY_URL
 	fi
 
 	if [ -z "$DEPLOY_URL" ]
 	then
 		git config --local --unset-all releases.stagedeployurl
 	else
-		git config --local --replace-all releases.stagedeployurl $DEPLOY_URL
+		git config --local --replace-all releases.stagedeployurl "$DEPLOY_URL"
 	fi
 }
 
@@ -500,14 +501,14 @@ function setqadeployurl {
 	if [ -z "$DEPLOY_URL" ]
 	then
 		echo "Enter the Rest URL to call to deploy the '$(qabranch)' branch. Blank to disable branch deployment."
-		read DEPLOY_URL
+		read -r DEPLOY_URL
 	fi
 
 	if [ -z "$DEPLOY_URL" ]
 	then
 		git config --local --unset-all releases.qadeployurl
 	else
-		git config --local --replace-all releases.qadeployurl $DEPLOY_URL
+		git config --local --replace-all releases.qadeployurl "$DEPLOY_URL"
 	fi
 }
 
@@ -517,7 +518,7 @@ function devfeature {
 	#git checkout $DEV_BRANCH
 	#git pull origin $DEV_BRANCH
 	fetchall
-	NOOUTPUT=`git checkout $DEV_BRANCH && git pull origin $DEV_BRANCH`
+	NOOUTPUT=$(git checkout "$DEV_BRANCH" && git pull origin "$DEV_BRANCH")
 
 	# feature might have been found by calling function
 	if [ -z "$FEATURE_CHOSEN" ]
@@ -525,7 +526,7 @@ function devfeature {
 		findfeature $1
 	fi
 	echo "Merging $FEATURE_CHOSEN into $DEV_BRANCH"
-	git merge --no-ff --no-edit $FEATURE_CHOSEN
+	git merge --no-ff --no-edit "$FEATURE_CHOSEN"
 
 	findconflicts
 
@@ -536,21 +537,21 @@ function devfeature {
 	fi
 
 	echo "Push '$DEV_BRANCH' up to Origin? (y/n)"
-	read PUSH
+	read -r PUSH
 	if [ "$PUSH" = "y" ] || [ "$PUSH" = "Y" ]
 		then
-		git push origin $DEV_BRANCH
+		git push origin "$DEV_BRANCH"
 
 		DEV_DEPLOY_URL=$(devdeployurl)
 		if [ ! -z "$DEV_DEPLOY_URL" ]
 		then
 			echo "Do you want to deploy the '$(devbranch)' branch to the dev branch location? (y/n)"
-			read DEPLOY_IT
+			read -r DEPLOY_IT
 
 			if [ "$DEPLOY_IT" = "Y" ] || [ "$DEPLOY_IT" = "y" ]
 			then
 				echo "Sending request to ($DEV_DEPLOY_URL)"
-				curl $DEV_DEPLOY_URL
+				curl "$DEV_DEPLOY_URL"
 			fi
 		fi
 
@@ -564,7 +565,7 @@ function devfeature {
 function updatelocal {
 	CURRENT_BRANCH=`git symbolic-ref --short HEAD`
 
-	LOCAL_MODS=`git status -sb | grep "M " | cut -c4-`
+	LOCAL_MODS=$(git status -sb | grep "M " | cut -c4-)
 	STASHED=false
 
 	if [ "$LOCAL_MODS" != "" ]
@@ -579,7 +580,7 @@ function updatelocal {
 		echo "y - to stash and restore after completed"
 		echo "n - to pull on top of your local changes - may cause conflicts"
 		echo "x to exit now"
-		read STASH_IT
+		read -r STASH_IT
 
 		if [ "$STASH_IT" == "Y" ] ||  [ "$STASH_IT" == "y" ]
 		then
@@ -597,15 +598,15 @@ function updatelocal {
 	fi
 
 	fetchall
-	ALL_LOCAL=`git branch`
+	ALL_LOCAL=$(git branch)
 	ALL_LOCAL=${ALL_LOCAL//\*}
 	for BRANCH in $ALL_LOCAL
 	do
 		echo "Examining Local Branch: $BRANCH"
-		NOOUTPUT=`git checkout $BRANCH`
+		NOOUTPUT=$(git checkout "$BRANCH")
 		echo "Checking Status"
-		GIT_BEHIND=`git status -sb | grep behind`
-		GIT_AHEAD=`git status -sb | grep ahead`
+		GIT_BEHIND=$(git status -sb | grep behind)
+		GIT_AHEAD=$(git status -sb | grep ahead)
 		if [ ! "$GIT_BEHIND" = "" ]
 		then
 			if [ "$GIT_AHEAD" = "" ]
@@ -616,18 +617,18 @@ function updatelocal {
 				echo "Local Branch $BRANCH is Ahead of origin."
 				echo "Not Pulling"
 				echo "Press Enter to Continue"
-				read NOTHING
+				read -r NOTHING
 			fi
 		else
 			echo "Nothing to Update"
 		fi
 	done
 
-	NOW_ON=`git symbolic-ref --short HEAD`
+	NOW_ON=$(git symbolic-ref --short HEAD)
 	if [ "$NOW_ON" != "$CURRENT_BRANCH" ]
 	then
 		echo "Putting you back on your original branch"
-		git checkout $CURRENT_BRANCH
+		git checkout "$CURRENT_BRANCH"
 	fi
 
 	if $STASHED
@@ -643,7 +644,7 @@ function newfeature {
 	echo "1 - feature/"
 	echo "2 - bugfix/"
 	echo "3 - hotfix/"
-	read THE_KIND
+	read -r THE_KIND
 	if [ "$THE_KIND" = "0" ]
 	then
 		PREFIX=""
@@ -661,7 +662,7 @@ function newfeature {
 
 	echo "Enter a descriptive name for your feature."
 	echo "(e.g. 'ISSUE-33_IncreaseTitleFont')"
-	read TITLE
+	read -r TITLE
 	if [ -z "$TITLE" ]
 	then
 		exit
@@ -673,12 +674,12 @@ function newfeature {
 
 	echo "Making Sure it Doesn't Exist"
 	fetchall
-	BRANCHES=`git branch -a | grep -i $NEW_FEATURE`
+	BRANCHES=$(git branch -a | grep -i $NEW_FEATURE)
 	BRANCHES=${BRANCHES//\*}
 
 	for BRANCH in $BRANCHES
 	do
-		trimfeaturename $BRANCH
+		trimfeaturename "$BRANCH"
 		shopt -s nocasematch
 		if [[ "$TRIMMED_FEATURE_NAME" = "$NEW_FEATURE" ]]
 		then
@@ -693,16 +694,16 @@ function newfeature {
 
 	echo "Create the above branch? (y/n)"
 
-	read CREATE_IT
+	read -r CREATE_IT
 	if [ "$CREATE_IT" = "Y" ] || [ "$CREATE_IT" = "y" ]
 	then
 		echo "git fetch --all"
 		# already ran it to find the feature name
 		# git fetch --all
 		echo "git checkout -b $PREFIX$TITLE origin/$(masterbranch)"
-		git checkout -b $PREFIX$TITLE origin/$(masterbranch)
+		git checkout -b "$PREFIX$TITLE" "origin/$(masterbranch)"
 		echo "git push -u origin $PREFIX$TITLE"
-		git push -u origin $PREFIX$TITLE
+		git push -u origin "$PREFIX$TITLE"
 	fi
 }
 
@@ -717,7 +718,7 @@ function pushfeature {
 	NEXT_REL_CANDIDATE=$(candidate)
 
 	# do a lookup of local feature branches
-	CURRENT_BRANCH=`git symbolic-ref --short HEAD`
+	CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
 
 	echo "Current Branch is '$CURRENT_BRANCH'"
 
@@ -732,7 +733,7 @@ function pushfeature {
 
 
 	echo "Is this the branch you are trying to push? (y/n)"
-	read IS_THIS_IT
+	read -r IS_THIS_IT
 
 	if [ ! "$IS_THIS_IT" = "Y" ] && [ ! "$IS_THIS_IT" = "y" ]
 	then
@@ -746,11 +747,11 @@ function pushfeature {
 
 	FEATURE_CHOSEN=$CURRENT_BRANCH
 
-	PF_ON_ORIGIN=`git status -sb | grep origin`
+	PF_ON_ORIGIN=$(git status -sb | grep origin)
 
-	PF_AHEAD=`git status -sb | grep ahead`
+	PF_AHEAD=$(git status -sb | grep ahead)
 
-	PF_BEHIND=`git status -sb | grep behind`
+	PF_BEHIND=$(git status -sb | grep behind)
 
 	if [ ! "$PF_BEHIND" = "" ]
 	then
@@ -769,16 +770,16 @@ function pushfeature {
 	elif [ "$PF_ON_ORIGIN" = "" ]
 	then
 		echo "Branch '$FEATURE_CHOSEN' Was Not Found on origin. Doing First Time Push."
-		git push -u origin $FEATURE_CHOSEN
+		git push -u origin "$FEATURE_CHOSEN"
 	else
 		echo "Please review and confirm before pushing the following changes:"
 		echo "$PF_AHEAD"
 		echo "Continue pushing '$FEATURE_CHOSEN' to origin? (y/n)"
-		read PUSH_AHEAD
+		read -r PUSH_AHEAD
 		if [ "$PUSH_AHEAD" = "Y" ] || [ "$PUSH_AHEAD" = "y" ]
 		then
 			echo "Pushing '$FEATURE_CHOSEN' to origin"
-			git push origin $FEATURE_CHOSEN
+			git push origin "$FEATURE_CHOSEN"
 		else
 			exit
 		fi
@@ -789,7 +790,7 @@ function pushfeature {
 
 	echo "git branch -r --no-merged $DEV_BRANCH | grep $FEATURE_CHOSEN"
 
-	PF_BRANCHES=`git branch -r --no-merged $DEV_BRANCH | grep $FEATURE_CHOSEN`
+	PF_BRANCHES=$(git branch -r --no-merged "$DEV_BRANCH" | grep "$FEATURE_CHOSEN")
 
 	MERGE_TO_DEV=false
 	for PF_BRANCH in $PF_BRANCHES
@@ -803,18 +804,18 @@ function pushfeature {
 	if $MERGE_TO_DEV
 	then
 		echo "Merging into '$DEV_BRANCH'"
-		devfeature $FEATURE_CHOSEN
+		devfeature "$FEATURE_CHOSEN"
 	else
 		echo "It's been merged into develop before"
 		# second value is how many revisions feature chosen is ahead of dev branch
-		AHEAD_REV=`git rev-list --left-right --count $DEV_BRANCH..$FEATURE_CHOSEN | cut -f2`
+		AHEAD_REV=$(git rev-list --left-right --count $DEV_BRANCH..$FEATURE_CHOSEN | cut -f2)
 		echo "Ahead by $AHEAD_REV"
 
 		if [ ! "$AHEAD_REV" = "0" ]
 		then
 			echo "It is ahead by $AHEAD_REV revisions"
 			echo "Merging changes"
-			devfeature $FEATURE_CHOSEN
+			devfeature "$FEATURE_CHOSEN"
 		else
 			echo "Feature '$FEATURE_CHOSEN' already up to date on '$DEV_BRANCH' - skipping merge"
 		fi
@@ -823,14 +824,14 @@ function pushfeature {
 
 
 	echo "Do you want to try to push this feature to the latest release candidate for '$(current)'? (y/n)"
-	read IS_IT
+	read -r IS_IT
 
 	if [ "$IS_IT" = "Y" ] || [ "$IS_IT" = "y" ]
 	then
 		echo "Searching For Latest Release Info"
 		checkout true
 	else
-		git checkout $CURRENT_BRANCH
+		git checkout "$CURRENT_BRANCH"
 		echo "Done"
 		exit
 	fi
@@ -839,7 +840,7 @@ function pushfeature {
 	PUSH_BRANCHES=$(branches)
 	for P_BRANCH in $PUSH_BRANCHES
 	do
-		trimfeaturename $P_BRANCH
+		trimfeaturename "$P_BRANCH"
 		if [ "$TRIMMED_FEATURE_NAME" = "$FEATURE_CHOSEN" ]
 		then
 			ROLL_NEW_RELEASE=true
@@ -858,7 +859,7 @@ function pushfeature {
 			echo "2 next - branches from '$(releasebranch)' to create '$(current)rc$((NEXT_REL_CANDIDATE+1))'; easier to diff changes between release candidates"
 			echo "3 append - merges on top of current release candidate '$(releasebranch)' - not recommended if you add a new feature. See 'help' for details."
 		fi
-		read ROLL_IT
+		read -r ROLL_IT
 		if [ "$ROLL_IT" = "1" ]
 		then
 			echo "Rolling new release from master branch"
@@ -880,7 +881,7 @@ function pushfeature {
 		then
 			echo "skipping making a new release candidate"
 		else
-			git checkout $CURRENT_BRANCH
+			git checkout "$CURRENT_BRANCH"
 			exit
 		fi
 
@@ -889,14 +890,14 @@ function pushfeature {
 		if [ "$ROLL_SUCCESSFUL" = "0" ]
 		then
 			echo "Do you want to deploy this release candidate into the '$(stagebranch)' branch? (y/n)"
-			read STAGE_IT
+			read -r STAGE_IT
 
 			if [ "$STAGE_IT" = "Y" ] || [ "$STAGE_IT" = 'y' ]
 			then
 				echo "Putting release candidate into '$(stagebranch)'.."
 				stage
 			else
-				git checkout $CURRENT_BRANCH
+				git checkout "$CURRENT_BRANCH"
 				exit
 			fi
 		fi
@@ -905,7 +906,7 @@ function pushfeature {
 		echo "To add it to the release, run:"
 		echo "git release add $FEATURE_CHOSEN"
 	fi
-	git checkout $CURRENT_BRANCH
+	git checkout "$CURRENT_BRANCH"
 }
 
 # -- List which branches are part of the current release that are not yet in master branch
@@ -913,8 +914,8 @@ function releasebranches {
 
 	CURRENT_RELEASE_BRANCH=$(releasebranch)
 	fetchall
-	NOOUTPUT=`git checkout $CURRENT_RELEASE_BRANCH && git pull origin $CURRENT_RELEASE_BRANCH`
-	comm -12 <(git branch -r --no-merged $(masterbranch)) <(git branch -r --merged $CURRENT_RELEASE_BRANCH) | grep -v $CURRENT_RELEASE_BRANCH | grep -v release
+	NOOUTPUT=$(git checkout "$CURRENT_RELEASE_BRANCH" && git pull origin "$CURRENT_RELEASE_BRANCH")
+	comm -12 <(git branch -r --no-merged "$(masterbranch)") <(git branch -r --merged "$CURRENT_RELEASE_BRANCH") | grep -v "$CURRENT_RELEASE_BRANCH" | grep -v release
 }
 
 ## Lab -- Expiremental Functions
@@ -923,7 +924,7 @@ function releasebranches {
 function createdevrelease {
 	echo "createrelease"
 	echo "Enter Current Release Number:"
-	read RELEASE_NUMBER
+	read -r RELEASE_NUMBER
 	init "$RELEASE_NUMBER-devrefresh" 0
 	DEV_BRANCHES=$(devbranches)
 	for BRANCH in $DEV_BRANCHES
@@ -938,28 +939,28 @@ function createdevrelease {
 function movedevbranch {
 	PREV_DEVBRANCH="$(devbranch)-prev"
 	git checkout -b $PREV_DEVBRANCH || git checkout $PREV_DEVBRANCH
-	git reset --hard $(devbranch)
-	git checkout $(devbranch)
-	git reset --hard $(releasebranch)
+	git reset --hard "$(devbranch)"
+	git checkout "$(devbranch)"
+	git reset --hard "$(releasebranch)"
 }
 
 function cleanup {
 	echo "Did we want to clean up the release branches?"
-	read CHOICE
+	read -r CHOICE
 	if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
 		then
-		cleanrelease
+		cleanrelease "$@"
 	fi
 
 	echo "Did we want to purge the local merged branches?"
-	read CHOICE
+	read -r CHOICE
 	if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
 		then
 		cleanupmergedlocalbranches
 	fi
 
 	echo "Did we want to purge the remote merged branches?"
-	read CHOICE
+	read -r CHOICE
 	if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
 		then
 		cleanupmergedremotebranches
@@ -969,8 +970,8 @@ function cleanup {
 
 # -- lists old releases and allows you to remove them from origin and local
 function cleanrelease {
-	git checkout $(masterbranch)
-	git pull origin $(masterbranch)
+	git checkout "$(masterbranch)"
+	git pull origin "$(masterbranch)"
 
 	CURRENT_RELEASE=$1
 	if [ -z "$CURRENT_RELEASE" ]
@@ -978,7 +979,7 @@ function cleanrelease {
 	fi
 
 	echo "Looking for Old Release Branches for $CURRENT_RELEASE..."
-	OLD_RELEASES=`git branch -r | grep $CURRENT_RELEASE | grep -v $(releasebranch)`
+	OLD_RELEASES=$(git branch -r | grep $CURRENT_RELEASE | grep -v "$(releasebranch)")
 
 	if [ -z "$OLD_RELEASES" ]
 	then
@@ -988,11 +989,11 @@ function cleanrelease {
 		do
 			RELEASE_ONLY=${OLD_RELEASE_BRANCH##*/}
 		    echo "Remove: $RELEASE_ONLY (y/n)"
-		    read CHOICE
+		    read -r CHOICE
 		    if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
 			then
-				git push origin --delete $RELEASE_ONLY
-				git branch -D $RELEASE_ONLY
+				git push origin --delete "$RELEASE_ONLY"
+				git branch -D "$RELEASE_ONLY"
 			fi
 		done
 	fi
@@ -1003,24 +1004,24 @@ function cleanrelease {
 function cleanupmergedlocalbranches {
 	CHOICE="n"
 	git config --global pager.branch false
-	git checkout $(masterbranch)
-	git pull origin $(masterbranch)
+	git checkout "$(masterbranch)"
+	git pull origin "$(masterbranch)"
 	GREP_CMD="git branch --merged | grep -v release | grep -v $(masterbranch)"
-	MERGED_BRANCHES=`git branch --merged | grep -v $(masterbranch) | grep -v $(qabranch) | grep -v $(stagebranch) | grep -v $(devbranch)`
-	echo $MERGED_BRANCHES
+	MERGED_BRANCHES=$(git branch --merged | grep -v "$(masterbranch)" | grep -v "$(qabranch)" | grep -v "$(stagebranch)" | grep -v "$(devbranch)")
+	echo "$MERGED_BRANCHES"
 	for RMM_BRANCH in $MERGED_BRANCHES
 	do
 		echo "Pulling Branch: $RMM_BRANCH"
 		if [ "$CHOICE" = "auto" ]
 			then
 			echo "Removing $RMM_BRANCH"
-			git branch -d $RMM_BRANCH
+			git branch -d "$RMM_BRANCH"
 		else
 			echo "$RMM_BRANCH shows to be merged to master branch, remove? (y/n)"
-			read CHOICE
+			read -r CHOICE
 			if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ] || [ "$CHOICE" = "auto" ]
 			then
-				git branch -d $RMM_BRANCH
+				git branch -d "$RMM_BRANCH"
 			fi
 		fi
 	done
@@ -1032,15 +1033,15 @@ function cleanupmergedremotebranches {
 	echo "IMPORTANT: You should have the most current release branch checked out"
 	echo "IMPORTANT: You should have have already run 'git release deploy' to have master branch merged in"
 	echo "Are these things handled? (y/n)"
-	read CONFIRMATION
+	read -r CONFIRMATION
 	if [ "$CONFIRMATION" = "Y" ] || [ "$CONFIRMATION" = "y" ]
 		then echo "Thanks for Confirming"
 		else exit
 	fi
 	git config --global pager.branch false
-	git checkout $(masterbranch)
-	git pull origin $(masterbranch)
-	MERGED_BRANCHES=`git branch -a --merged | grep remotes | grep -v $(masterbranch)`
+	git checkout "$(masterbranch)"
+	git pull origin "$(masterbranch)"
+	MERGED_BRANCHES=$(git branch -a --merged | grep remotes | grep -v "$(masterbranch)")
 	for RMM_BRANCH in $MERGED_BRANCHES
 	do
 		echo "Pulling Branch: $RMM_BRANCH"
@@ -1054,13 +1055,13 @@ function cleanupmergedremotebranches {
 			then
 			if [ "$CHOICE" = "auto" ]
 				then
-				git push origin --delete $RMM_BRANCH_ONLY
+				git push origin --delete "$RMM_BRANCH_ONLY"
 			else
 				echo "$RMM_BRANCH_ONLY shows to be merged to master branch, remove? (y)"
-				read CHOICE
+				read -r CHOICE
 				if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ] || [ "$CHOICE" = "auto" ]
 					then
-					git push origin --delete $RMM_BRANCH_ONLY
+					git push origin --delete "$RMM_BRANCH_ONLY"
 				fi
 			fi
 		fi
@@ -1069,7 +1070,7 @@ function cleanupmergedremotebranches {
 
 # -- remove all local branches except master branch
 function purgelocalbranches {
-	git branch | grep -v $(masterbranch) | xargs git branch -d
+	git branch | grep -v "$(masterbranch)" | xargs git branch -d
 }
 
 ## -- End Lab
@@ -1080,26 +1081,26 @@ function reset {
 
 # -- push the release branch to origin
 function push {
-	git push origin $(releasebranch)
+	git push origin "$(releasebranch)"
 }
 
 # -- remove the current release from origin and roll back a release candidate number
 function dump {
-	RELEASE_BRANCH=$(releasebranch)
+	RELEASE_BRANCH="$(releasebranch)"
 	echo "Dumping $RELEASE_BRANCH, correct? (Y/N):"
-	read DUMP
+	read -r DUMP
 	if [ "$DUMP" = "Y" ]
 	then
 		git reset --hard
-		git checkout $(masterbranch)
-		git branch -D $RELEASE_BRANCH
-		git push origin --delete $RELEASE_BRANCH
-		RELEASE_CANDIDATE=`git config --get-all releases.candidate`
+		git checkout "$(masterbranch)"
+		git branch -D "$RELEASE_BRANCH"
+		git push origin --delete "$RELEASE_BRANCH"
+		RELEASE_CANDIDATE=$(git config --get-all releases.candidate)
 		git config --local --replace-all releases.candidate "$((RELEASE_CANDIDATE-1))"
 	fi
 }
 
-# -- manually edit the release file and then read in the settings
+# -- manually edit the release file and then read -r in the settings
 function edit {
 	nano "releases/$(current)"
 	readinreleasefile
@@ -1107,7 +1108,7 @@ function edit {
 
 # -- checkout the current release branch and write a release file
 function writeout {
-	git checkout $(releasebranch)
+	git checkout "$(releasebranch)"
 	writereleasefile
 }
 
@@ -1115,7 +1116,8 @@ function writereleasefile {
 	echo "" > "releases/$(current)"
 	for BRANCH in $(branches)
 	do
-	    echo $BRANCH >> "releases/$(current)"
+	    echo "$BRANCH" >> "releases/$(current)"
+
 	done
 }
 
@@ -1127,7 +1129,7 @@ function readinreleasefile {
 	clearbranches
 	for BRANCH in `cat releases/$(current) $(current)`
 	do
-	    add $BRANCH
+	    add "$BRANCH"
 	done
 	git reset --hard
 	status
@@ -1147,9 +1149,9 @@ function migratereleases {
 	for RELEASE_FILE in `ls release-v*`
 	do
 		echo "Moving Release File: $RELEASE_FILE to releases folder."
-	    mv $RELEASE_FILE releases/
+	    mv "$RELEASE_FILE" releases/
 	    git add "releases/$RELEASE_FILE"
-	    git rm $RELEASE_FILE
+	    git rm "$RELEASE_FILE"
 	    COMMIT=$((COMMIT+1))
 	done
 	if [ "$COMMIT" -gt "0" ]
@@ -1174,12 +1176,12 @@ function findfeature {
 		echo "1 List all feature/ branches"
 		echo "2 List all bugfix/ branches"
 		echo "3 List all hotfix/ branches"
-		read SEARCH_TYPE
+		read -r SEARCH_TYPE
 
 		if [ "$SEARCH_TYPE" = "0" ]
 	    then
 			echo "Enter part of a Feature Branch name: (we will search for it) "
-			read FEATURE_QUERY
+			read -r FEATURE_QUERY
 		elif [ "$SEARCH_TYPE" = "1" ]
 		then
 			FEATURE_QUERY="feature/"
@@ -1196,9 +1198,9 @@ function findfeature {
 
 	if [ -z "$FF_LOCAL_ONLY" ] || ! $FF_LOCAL_ONLY
 	then
-		FF_BRANCHES=`git branch -a | grep $FEATURE_QUERY`
+		FF_BRANCHES=$(git branch -a | grep $FEATURE_QUERY)
 	else
-		FF_BRANCHES=`git branch | grep $FEATURE_QUERY`
+		FF_BRANCHES=$(git branch | grep $FEATURE_QUERY)
 	fi
 	# set it back to false - must be set to true by caller to work
 	FF_LOCAL_ONLY=false
@@ -1221,7 +1223,7 @@ function findfeature {
 			OPTION=$((OPTION+1))
 		done
 		echo "Select Branch: (X = cancel)"
-		read CHOICE
+		read -r CHOICE
 		if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
 			then exit;
 		fi
@@ -1251,13 +1253,13 @@ function checkoutfeature {
 			fi
 		done
 
-		if [ BRANCH_FOUND ]
+		if [ $BRANCH_FOUND ]
 		then
 			echo "local branch $TRIMMED_FEATURE_NAME already exists"
-			git checkout $TRIMMED_FEATURE_NAME
+			git checkout "$TRIMMED_FEATURE_NAME"
 		else
 			echo "checking out remote branch $FEATURE_CHOSEN as $TRIMMED_FEATURE_NAME"
-			git checkout -b $TRIMMED_FEATURE_NAME $FEATURE_CHOSEN
+			git checkout -b "$TRIMMED_FEATURE_NAME" "$FEATURE_CHOSEN"
 		fi
 	fi
 }
@@ -1285,12 +1287,12 @@ function feature {
 function add {
 	BRANCH_TO_ADD=$1
 	CURRENT_RELEASE=$(current)
-	if [ -z "CURRENT_RELEASE" ]
+	if [ -z "$CURRENT_RELEASE" ]
 		then
 		echo "No Release is Initialized"
 		exit 1;
 	fi
-	git config --add releases.branches $BRANCH_TO_ADD
+	git config --add releases.branches "$BRANCH_TO_ADD"
 }
 
 # -- lists currently configured branches for the release and lets you remove one
@@ -1306,13 +1308,13 @@ function rm {
 		OPTION=$((OPTION+1))
 	done
 	echo "Select Branch to Remove: (X = cancel)"
-	read CHOICE
+	read -r CHOICE
 	if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
 		then exit;
 	fi
-	RM_BRANCH_CHOOSEN=${OPTIONLIST[$CHOICE]}
+	RM_BRANCH_CHOSEN=${OPTIONLIST[$CHOICE]}
 
-	remove $RM_BRANCH_CHOOSEN
+	remove "$RM_BRANCH_CHOSEN"
 
 }
 
@@ -1343,7 +1345,7 @@ function nextreleasebranch {
 
 # -- util - increment the release candidate number and return the value
 function nextcandidate {
-	RELEASE_CANDIDATE=`git config --get-all releases.candidate`
+	RELEASE_CANDIDATE=$(git config --get-all releases.candidate)
 	git config --local --replace-all releases.candidate "$((RELEASE_CANDIDATE+1))"
 	echo "$((RELEASE_CANDIDATE+1))"
 }
@@ -1351,7 +1353,7 @@ function nextcandidate {
 # -- util - set the next release candidate number
 function setcandidate {
 	RELEASE_CANDIDATE=$1
-	git config --local --replace-all releases.candidate $RELEASE_CANDIDATE
+	git config --local --replace-all releases.candidate "$RELEASE_CANDIDATE"
 	echo "Release Candidate set to: $RELEASE_CANDIDATE"
 }
 
@@ -1416,11 +1418,11 @@ function qadeployurl {
 
 # -- util - get the name of the master branch
 function masterbranch {
-	MASTER_BRANCH=`git config --get-all releases.masterbranch`
+	MASTER_BRANCH=$(git config --get-all releases.masterbranch)
 	if [ -z "$MASTER_BRANCH" ]
 		then
 		git config --local --replace-all releases.masterbranch "master"
-		MASTER_BRANCH=`git config --get-all releases.masterbranch`
+		MASTER_BRANCH=$(git config --get-all releases.masterbranch)
 	fi
 	echo "$MASTER_BRANCH"
 }
@@ -1433,11 +1435,11 @@ function setmasterbranch {
 
 # -- util - get the name of the master branch
 function stagebranch {
-	STAGE_BRANCH=`git config --get-all releases.stagebranch`
+	STAGE_BRANCH=$(git config --get-all releases.stagebranch)
 	if [ -z "$STAGE_BRANCH" ]
 		then
 		git config --local --replace-all releases.stagebranch "staging"
-		STAGE_BRANCH=`git config --get-all releases.stagebranch`
+		STAGE_BRANCH=$(git config --get-all releases.stagebranch)
 	fi
 	echo "$STAGE_BRANCH"
 }
@@ -1450,11 +1452,11 @@ function setstagebranch {
 
 # -- util - get the name of the qa branch
 function qabranch {
-	QA_BRANCH=`git config --get-all releases.qabranch`
+	QA_BRANCH=$(git config --get-all releases.qabranch)
 	if [ -z "$QA_BRANCH" ]
 		then
 		git config --local --replace-all releases.qabranch "qa"
-		QA_BRANCH=`git config --get-all releases.qabranch`
+		QA_BRANCH=$(git config --get-all releases.qabranch)
 	fi
 	echo "$QA_BRANCH"
 }
@@ -1482,7 +1484,7 @@ function fetchall {
 }
 
 function status {
-	if [ -z $(current) ]
+	if [ -z "$(current)" ]
 		then
 		echo " "
 		echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = "
@@ -1493,7 +1495,7 @@ function status {
 	fi
 
 	IN_BRANCH_CMD="git branch --merged $(masterbranch) | grep $(releasebranch)"
-	IN_MASTER=`$IN_BRANCH_CMD`
+	IN_MASTER=$($IN_BRANCH_CMD)
 	if [ -z "$IN_MASTER" ]
 		then echo "Status: Pending (Not merged into $(masterbranch))"
 		else echo "Status: Deployed (Merged into Master)"
@@ -1523,38 +1525,8 @@ function deploystatus {
 		if [ "$UNMERGED_BRANCH" == "Fetching" ]
 			then continue
 		fi
-		COMMIT=`git rev-parse "$UNMERGED_BRANCH"`
+		COMMIT=$(git rev-parse "$UNMERGED_BRANCH")
 		echo "$UNMERGED_BRANCH @ $COMMIT"
-	done
-}
-
-#depreciated
-function originalcreate {
-	# Name of new release branch to be created
-	RELEASE_BRANCH=$2
-
-	# Path to text file which contains branches to be merged
-	RELEASE_FILE=$1
-
-	if [ -z "$RELEASE_BRANCH" ] || [ -z "$RELEASE_FILE" ]
-	then
-	    echo "Usage `basename $0` filename branchname" >&2
-	    exit 1;
-	fi
-
-	echo "Creating $RELEASE_BRANCH..."
-
-	git checkout -b $RELEASE_BRANCH $(masterbranch)
-
-	cp $RELEASE_FILE $RELEASE_BRANCH
-
-	git add $RELEASE_BRANCH
-
-	git commit -m "Adding Release Branch Definition file"
-
-	for BRANCH in `cat $RELEASE_FILE`
-	do
-	    git merge --no-ff --no-edit $BRANCH
 	done
 }
 
@@ -1609,7 +1581,7 @@ function help {
 	echo "                    * roll - (same as 'git release roll') only offered when candidate is 0"
 	echo "                    * next - (same as 'git release next')"
 	echo "                    * append - (same as 'git release append') - might have issues if new features are added. If other developers"
-	echo "                              attempt to 'append', 'git release checkout' won't read in the new features automatically and some"
+	echo "                              attempt to 'append', 'git release checkout' won't read -r in the new features automatically and some"
 	echo "                              features could be lost. If you want to do an append, you should manually run 'git release checkout'"
 	echo "                              to pull down the latest release candidate and then confirm that your feature is configured the in"
 	echo "                              the added features list."
@@ -1656,16 +1628,18 @@ function help {
 
 COMMAND=$1
 
+shift
+
 if [ -z "$COMMAND" ]
 	then
 	echo " "
 	echo " "
-	echo " use `git release help` for more command information. "
+	echo ' use `git release help` for more command information. '
 	echo " "
 	echo " "
 	echo " "
-	echo " use `git release status` to see what the current settings are. "
+	echo ' use `git release status` to see what the current settings are.'
 	status
 fi
 
-$COMMAND $2 $3
+$COMMAND "$@"
