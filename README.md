@@ -8,7 +8,7 @@ Under the hood `git release` uses the git config system to store lists of branch
 
 
 *Install:*
-Quick install: `curl -s -L https://raw.githubusercontent.com/neverbehind/git-release/master/install.sh | bash`
+Quick install: `curl -s -L https://raw.githubusercontent.com/neverbehind/git-release/main/install.sh | bash`
 
 
 Repo Install:
@@ -38,11 +38,11 @@ Repo Install:
  - Commits the Branch list to the new branch
  - Merges in each of the added feature branches
 - `git release append` similar to roll, but doesn't create a new release branch, simple remerges all branches into the current RC
-- `git release next` similar to roll, but uses current release branch as the base branch, instead of master
-- `git release deploy` checkout master, and merge in release branch and tag commit with release tag.
+- `git release next` similar to roll, but uses current release branch as the base branch, instead of the main branch
+- `git release deploy` checkout the main branch, and merge in release branch and tag commit with release tag.
 - `git release dump` deletes release branch and rollsback the candidate version.
 - `git release checkout` displays a list of release branches, allows for switching from release to release
-- `git release devbranches` to list out branches that are contained in the development branch, that are not yet on master
+- `git release devbranches` to list out branches that are contained in the development branch, that are not yet on the main branch
 - `git release checkoutfeature` to find and create local branch from remote feature branch
 
 *Helpful Tools*
