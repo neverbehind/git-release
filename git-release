@@ -121,6 +121,10 @@ function roll {
 
 	fetchall
 
+  git checkout "$(mainbranch)"
+
+  git pull
+
 	echo "Creating $RELEASE_BRANCH..."
 
 	git checkout -b "$RELEASE_BRANCH" "$(mainbranch)"
@@ -1169,6 +1173,8 @@ function clearbranches {
 function findfeature {
 	FEATURE_QUERY=$1
 
+	git remote update
+
 	if [ -z "$FEATURE_QUERY" ]
 	then
 		echo "Find a branch by type, or search for it by name: "
@@ -1528,6 +1534,12 @@ function deploystatus {
 		COMMIT=$(git rev-parse "$UNMERGED_BRANCH")
 		echo "$UNMERGED_BRANCH @ $COMMIT"
 	done
+}
+
+function upgrade {
+  curl https://raw.githubusercontent.com/neverbehind/git-release/main/git-release -o ~/bin/git-release
+   
+  chmod +x ~/bin/git-release
 }
 
 function help {
