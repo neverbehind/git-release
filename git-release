@@ -389,21 +389,45 @@ function deploy {
 	fi
 }
 
+# -- merge the current release candidate into a deployment trigger branch
+function to {
+	TRUNK_BRANCH=$1
+	RELEASE_BRANCH=$(releasebranch)
+	MAIN_BRANCH=$(mainbranch)
+
+	fetchall
+
+	git checkout "$TRUNK_BRANCH"
+
+	if [[ "$TRUNK_BRANCH" = "$MAIN_BRANCH" ]]
+		then
+		echo "You can't release to main branch. If you are trying to merge use 'git release merge $MAIN_BRANCH' instead."
+	else
+		git reset --hard "$(mainbranch)"
+	fi
+
+	git merge --no-ff --no-edit "$RELEASE_BRANCH"
+	git push origin "$TRUNK_BRANCH" -f
+}
+
+
 # -- merge the current release candidate into arbitrary branch
 function merge {
 	MERGE_TO_BRANCH=$1
 	RELEASE_BRANCH=$(releasebranch)
+
 	fetchall
+
 	git checkout "$MERGE_TO_BRANCH"
 	git pull origin "$MERGE_TO_BRANCH"
 	git merge --no-ff --no-edit "$RELEASE_BRANCH"
 	git push origin "$MERGE_TO_BRANCH"
 
-	if [ "$MERGE_TO_BRANCH" = "$(mainbranch)" ]
+	if [[ "$MERGE_TO_BRANCH" = "$(mainbranch)" ]]
 		then
 		echo "It's customary to Tag when merging to $(mainbranch), shall we tag with release? (y/n)"
 		read -r PUSH
-		if [ "$PUSH" = "y" ] || [ "$PUSH" = "Y" ]
+		if [[ "$PUSH" = "y" ]] || [[ "$PUSH" = "Y" ]]
 			then
 			tag
 		fi
@@ -1173,7 +1197,7 @@ function clearbranches {
 function findfeature {
 	FEATURE_QUERY=$1
 
-	git remote update
+	fetchall
 
 	if [ -z "$FEATURE_QUERY" ]
 	then
@@ -1538,7 +1562,7 @@ function deploystatus {
 
 function upgrade {
   curl https://raw.githubusercontent.com/neverbehind/git-release/main/git-release -o ~/bin/git-release
-   
+
   chmod +x ~/bin/git-release
 }
 
