@@ -1413,6 +1413,12 @@ function afterversioncommit {
 	if [ -e afterversioncommit.sh ]
 	then
 		bash afterversioncommit.sh
+		if [ $? -ne 0 ]; then
+		    echo "After version commit failed. Exiting process."
+    		exit 1
+	fi
+
+echo "Build completed successfully."
 	fi
 }
 
