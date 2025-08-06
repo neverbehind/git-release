@@ -1413,12 +1413,15 @@ function afterversioncommit {
 	if [ -e afterversioncommit.sh ]
 	then
 		bash afterversioncommit.sh
-		if [ $? -ne 0 ]; then
+		RESULT=$?
+		if [ "$COMMAND" = "append" ] && [ "$RESULT" -eq 1 ]; then
+    		echo "Note: afterversioncommit.sh returned exit code 1 (nothing to commit) during 'append'. Continuing."
+    elif [ "$RESULT" -ne 0 ]; then
 		    echo "After version commit failed. Exiting process."
     		exit 1
-	fi
+	  fi
 
-echo "Build completed successfully."
+  echo "Build completed successfully."
 	fi
 }
 
