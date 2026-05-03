@@ -47,3 +47,58 @@ Repo Install:
 
 *Helpful Tools*
 - Versioning other systems can be achieved by adding a `afterversioncommit.sh` file to the repo, this file is executed after the version file is created, and committed to the repo. This is helpful for projects that use NPM packager, or composer, and you want to set the version in a package.json or composer.json file. 
+
+
+## Recent Changes
+
+### `git release to <target>` — release-merge-back guards
+
+`git release to <target>` now hard-blocks three classes of silent failure
+that previously caused fixes to disappear between releases:
+
+- **R-e — stale local target.** Refuses to operate when the local `<target>`
+  branch is behind `origin/<target>`. Force-pushing in that state would
+  regress origin. Recover with:
+  `git fetch origin && git checkout <target> && git reset --hard origin/<target>`.
+
+- **R-f — `Already up to date.` is a topology mismatch.** When the merge of
+  the release branch into `<target>` reports `Already up to date.`, the tool
+  refuses to push. The release branch should not already be an ancestor of a
+  clean `<target>` — that signals stale local state. Same recovery as R-e.
+
+- **R-a — release tip must be in `origin/<mainbranch>` after push.** After
+  the deploy push, the tool verifies that `git merge-base --is-ancestor
+  <release-tip> origin/<mainbranch>` returns 0. If not, the release was
+  deployed but never merged back to main — the silent fix-drop pattern. The
+  error message includes the recovery commands.
+
+In addition, a latent bug was fixed: `git release to <target>` previously did
+`git reset --hard $(mainbranch)` which reset the trunk branch to LOCAL main
+instead of `origin/<target>`. It now resets to `origin/<target>` (after R-e
+has confirmed origin is sane).
+
+#### Escape hatch
+
+If you have a workflow where the deploy target is not expected to merge back
+to main (typical for repos that don't use a merge-back-to-main convention), set
+`GIT_RELEASE_SKIP_ANCESTOR_CHECK=1` to bypass R-a only:
+
+```bash
+GIT_RELEASE_SKIP_ANCESTOR_CHECK=1 git release to <target>
+```
+
+R-e and R-f are unconditional safety checks and have no escape hatch — they
+catch states where pushing would regress remote state, which is never the
+intended action.
+
+#### Scenario scripts
+
+Reproducible failure-mode tests live in `scenarios/`. See
+`scenarios/README.md` for how to run them.
+
+#### Known parity gap
+
+These guards live only in `function to`. `git release deploy` (the older
+multi-environment path) is unchanged — it does not see the guards. If you
+rely on `deploy` for production releases, file a ticket to port them.
+
