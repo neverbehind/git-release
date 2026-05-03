@@ -1,5 +1,5 @@
 #!/bin/bash
-# I40 scenario test helpers.
+# Sandbox helpers for `function to` guard scenario tests.
 #
 # Each scenario sources this file, then calls `setup_sandbox` to build a
 # self-contained playground in $TMPDIR with:
@@ -32,7 +32,7 @@ bad()  { FAIL=$((FAIL+1)); printf "  FAIL: %s\n" "$*" >&2; }
 # --- Sandbox setup ---------------------------------------------------------
 
 setup_sandbox() {
-	SANDBOX=$(mktemp -d -t git-release-i40-XXXXXX)
+	SANDBOX=$(mktemp -d -t git-release-scenario-XXXXXX)
 	ORIGIN="$SANDBOX/origin.git"
 	REPO="$SANDBOX/repo"
 	export SANDBOX ORIGIN REPO
@@ -53,7 +53,7 @@ setup_sandbox() {
 		cd "$REPO"
 		git init --quiet -b main
 		git config user.email "scenario@example.invalid"
-		git config user.name "I40 Scenario"
+		git config user.name "git-release scenarios"
 		echo "init" > README
 		git add README
 		git commit --quiet -m "init"

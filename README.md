@@ -51,7 +51,7 @@ Repo Install:
 
 ## Recent Changes
 
-### `git release to <target>` — release-merge-back guards (I40)
+### `git release to <target>` — release-merge-back guards
 
 `git release to <target>` now hard-blocks three classes of silent failure
 that previously caused fixes to disappear between releases:
@@ -80,7 +80,7 @@ has confirmed origin is sane).
 #### Escape hatch
 
 If you have a workflow where the deploy target is not expected to merge back
-to main (likely the case for non-Fazemos consumers), set
+to main (typical for repos that don't use a merge-back-to-main convention), set
 `GIT_RELEASE_SKIP_ANCESTOR_CHECK=1` to bypass R-a only:
 
 ```bash

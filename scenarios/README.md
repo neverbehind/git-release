@@ -1,6 +1,6 @@
 # git-release scenario scripts
 
-Reproducible failure-mode test scripts for the I40 release-merge-back guards.
+Reproducible failure-mode test scripts for the `function to` merge-back guards.
 Each script builds a self-contained sandbox repo (under `mktemp -d`), exercises
 one specific failure mode against `git-release`, and asserts on exit codes and
 error output.
@@ -49,7 +49,7 @@ GIT_RELEASE_BIN=/path/to/git-release ./scenarios/scenario_a_merge_back_happy_pat
 | `scenario_b_stale_local_target.sh` | R-e (stale local target) | Tool aborts before the merge; `origin/<target>` is unchanged. |
 | `scenario_c_topology_mismatch.sh` | R-f (`Already up to date.`) | Tool aborts after the merge but before the push; `origin/<target>` is unchanged. |
 
-## Why a sandbox repo and not a fazemos-* clone
+## Why a sandbox repo and not a real-repo clone
 
 The scripts force-push, reset --hard, and otherwise mutate refs aggressively.
 They MUST run in a throwaway repo. Never point them at a working clone.
