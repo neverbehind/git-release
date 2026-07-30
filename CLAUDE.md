@@ -33,19 +33,32 @@ Release files are also written to a `releases/` directory in the repo as a backu
 
 ### Guards (`function to` hardening)
 
-`function to` is the single chokepoint for "merge release into deployment trigger branch and push." It carries four safety checks plus one latent-bug fix:
+`function to` is the single chokepoint for "merge release into deployment trigger branch and push."
+
+**THE CONTRACT: `<target>` IS DISPOSABLE.** `to <target>` rebuilds `<target>` as `origin/$(mainbranch)` + release branch and force-pushes it. Deploy-trigger branches (`dev`/`stage`/`qa`) carry no history of their own and are never a source of truth; anything committed directly to them is discarded on the next deploy. The pre-existing `git push -f` is the tell. **Any guard added here must protect main and the release topology, never `<target>`'s prior state** — a guard defending `origin/<target>` from being rewound is defending the very thing this command exists to rewind, and will deadlock the workflow on the second deploy of an RC.
+
+The reset base is `origin/$MAIN_BRANCH`, not local `$(mainbranch)`: `fetchall` has just refreshed the remote ref, whereas local main may be arbitrarily stale and would silently deploy old code.
+
+**MERGE-BACK TO MAIN HAPPENS AFTER THE DEPLOY.** `to <target>` must therefore never assert anything about `origin/$(mainbranch)` containing the release. Such a check runs before merge-back can have occurred: it fails on every deploy and returns non-zero even though the push succeeded. The right place to catch a never-merged-back release is when the next release is cut from main (`roll`/`next`) — not at deploy time.
+
+`to` is deliberately thin. Its full helper set:
 
 | Helper | Requirement | When it runs | On failure |
 |--------|-------------|--------------|------------|
 | `is_release_branch_active` | Defensive precondition | Top of `to` | Aborts with "no release branch configured" |
-| `verify_local_target_fresh` | R-e: local `<target>` must not be behind `origin/<target>` | Before `git reset --hard` | Aborts with recovery command (`git reset --hard origin/<target>`) |
-| (latent fix) | `git reset --hard origin/$TRUNK_BRANCH` instead of `$(mainbranch)` | After R-e passes | n/a — bug fix |
-| `verify_release_merge_not_no_op` | R-f: merge of release branch must not report "Already up to date." | After `git merge --no-ff` | Aborts before push with topology-mismatch diagnostic |
-| `verify_release_in_origin_main` | R-a: release tip must be reachable from `origin/$(mainbranch)` | After `git push -f` | Aborts with merge-back recovery commands; honors `GIT_RELEASE_SKIP_ANCESTOR_CHECK=1` |
+| `notice_release_merge_no_op` | Reports "Already up to date." from the release merge | After `git merge --no-ff` | Never blocks — prints `NOTICE` and continues |
 
-R-a's escape hatch (`GIT_RELEASE_SKIP_ANCESTOR_CHECK=1`) exists because some consumers' `to <target>` workflows legitimately don't merge back to main. R-e and R-f are unconditional — they prevent regressing origin and have no documented legitimate workflow.
+The no-op notice is advisory *because* the reset base is main: `Already up to date.` just means `origin/main` already contains the release tip (a prior cycle's merge-back landed, or the RC is being redeployed). Benign.
 
-The guards live ONLY in `function to`. `function deploy` (the older multi-env code path) does NOT have them; it is documented as a parity gap (it is not on the path the new guards exercise). `function status`'s `git branch --merged $(mainbranch) | grep $(releasebranch)` check is informational and uses LOCAL main — it is a near-miss for R-a and is a v1.1 candidate to harden the same way.
+**Regression history — do not reintroduce any of these.** Commit `531692e` shipped three checks that each broke normal use, all since removed:
+
+- **Reset base changed to `origin/$TRUNK_BRANCH`** (labelled a "latent bug fix"). Half right: local main *was* a staleness hazard. But it fixed that by preserving `<target>`'s history, defeating the rebuild-from-main contract entirely. The correct fix is `origin/$MAIN_BRANCH`, which is what the line now reads.
+- **R-e** — aborted when local `<target>` was behind `origin/<target>`, i.e. defended the branch this command exists to force-push. Deadlocked the second deploy of an RC.
+- **R-a** — post-push ancestor check against `origin/$(mainbranch)`, plus a hard-blocking **R-f** on `Already up to date.`. These directly contradicted each other: R-a demanded merge-back, R-f punished the topology a healthy merge-back produces. R-a also fired on every deploy in the normal deploy-then-merge-back ordering.
+
+`GIT_RELEASE_SKIP_ANCESTOR_CHECK` was R-a's escape hatch and is now unused; the script no longer reads it.
+
+`function deploy` (the older multi-env code path) is a parity gap: it still does `git reset --hard "$(mainbranch)"` for non-prod envs — same rebuild-from-main intent as `to`, but off LOCAL main, so it retains the staleness hazard `to` now avoids. `function status`'s `git branch --merged $(mainbranch) | grep $(releasebranch)` check is informational and uses LOCAL main.
 
 Scenario scripts under `scenarios/` build self-contained sandbox repos and exercise each guard. Run `scenarios/scenario_*.sh` to verify.
 

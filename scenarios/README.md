@@ -12,10 +12,8 @@ plugin discovery. Each script is standalone and can be run on its own.
 
 ```bash
 # From the repo root:
-./scenarios/scenario_a_merge_back_happy_path.sh
-./scenarios/scenario_a2_skip_hatch.sh
-./scenarios/scenario_b_stale_local_target.sh
-./scenarios/scenario_c_topology_mismatch.sh
+./scenarios/scenario_b_target_rebuilt_from_main.sh
+./scenarios/scenario_c_no_op_merge_notice.sh
 ```
 
 Each script prints `PASS` / `FAIL` lines and a final `RESULT` summary. Exit
@@ -27,7 +25,7 @@ Each scenario destroys its sandbox on exit. To keep the sandbox around for
 manual inspection:
 
 ```bash
-KEEP_SANDBOX=1 ./scenarios/scenario_b_stale_local_target.sh
+KEEP_SANDBOX=1 ./scenarios/scenario_b_target_rebuilt_from_main.sh
 # ... look at the printed sandbox path ...
 ```
 
@@ -37,17 +35,15 @@ By default the scripts run the `git-release` executable in the parent directory.
 Override with:
 
 ```bash
-GIT_RELEASE_BIN=/path/to/git-release ./scenarios/scenario_a_merge_back_happy_path.sh
+GIT_RELEASE_BIN=/path/to/git-release ./scenarios/scenario_b_target_rebuilt_from_main.sh
 ```
 
 ## What each scenario covers
 
-| Script | Guard exercised | Expected outcome |
-|--------|------------------|------------------|
-| `scenario_a_merge_back_happy_path.sh` | R-a (ancestor check) | Tool aborts when release tip is not in `origin/main`; succeeds after merge-back. |
-| `scenario_a2_skip_hatch.sh` | R-a escape hatch | `GIT_RELEASE_SKIP_ANCESTOR_CHECK=1` bypasses R-a with a logged warning. |
-| `scenario_b_stale_local_target.sh` | R-e (stale local target) | Tool aborts before the merge; `origin/<target>` is unchanged. |
-| `scenario_c_topology_mismatch.sh` | R-f (`Already up to date.`) | Tool aborts after the merge but before the push; `origin/<target>` is unchanged. |
+| Script | Behavior exercised | Expected outcome |
+|--------|--------------------|------------------|
+| `scenario_b_target_rebuilt_from_main.sh` | rebuild-from-main contract | `<target>` is re-derived from `origin/main` + release: junk on `<target>` is discarded, a stale LOCAL main is not used, and a deploy that precedes merge-back exits 0 silently. |
+| `scenario_c_no_op_merge_notice.sh` | no-op release merge | Tool prints a `NOTICE` and still deploys; `origin/<target>` ends up at `origin/main`. |
 
 ## Why a sandbox repo and not a real-repo clone
 

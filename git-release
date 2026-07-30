@@ -389,26 +389,35 @@ function deploy {
 	fi
 }
 
-# -- function-to safety guards (merge-back family) -----------------------------
+# -- function-to helpers -------------------------------------------------------
 #
-# These helpers harden `function to` against three families of failure:
-#   - R-e: deploying from a stale local target branch
-#   - R-f: silently no-op'ing when the release branch is already an
-#          ancestor of the (likely stale) deployment target
-#   - R-a: leaving the release tip un-merged-back to main, so the
-#          next release cut from main silently drops the prior fix
+# THE DEPLOYMENT TARGET IS DISPOSABLE. `to <target>` rebuilds <target> as
+# (origin/main + release) and force-pushes it. That is the whole contract:
+# the deploy-trigger branches (dev/stage/qa/production) carry no history of
+# their own and are never a source of truth.
 #
-# All four helpers are called only from `function to`; they are intentionally
-# small and side-effect free apart from the documented `git fetch` in
-# `verify_release_in_origin_main`.
+# Two hard-won rules for anything added here:
+#
+#   1. Never guard <target>'s prior state. A check that defends origin/<target>
+#      from being rewound is defending the thing this command exists to rewind,
+#      and will deadlock the workflow on the second deploy of an RC.
+#
+#   2. Never require merge-back to main at deploy time. Merge-back happens
+#      AFTER the deploy, so a post-push ancestor check runs before the
+#      merge-back can have occurred: it fails on every single deploy and
+#      returns non-zero even though the push succeeded. The right place to
+#      catch a never-merged-back release is when the next release is cut from
+#      main (`roll`/`next`).
+#
+# Both mistakes shipped once (R-e/R-f-blocking and R-a respectively) and both
+# broke normal use. `to` is now deliberately thin: one precondition, one notice.
 #
 # Naming/conventions:
 #   - LOCAL branch helpers (`mainbranch`, `stagebranch`, `qabranch`, `devbranch`)
 #     return LOCAL ref names. Every comparison against remote state must
 #     explicitly prepend `origin/`.
-#   - All helpers honor the `FETCHED_ALL` flag via `fetchall` — they never
+#   - Helpers honor the `FETCHED_ALL` flag via `fetchall` — they never
 #     blanket-fetch a second time within one command invocation.
-#   - All helpers `return 1` on guard failure; `function to` propagates.
 
 # -- returns 0 when a release branch is configured (i.e. `git release init`
 #    has been run and a candidate exists). Used as a defensive precondition
@@ -421,101 +430,29 @@ function is_release_branch_active {
 	return 0
 }
 
-# -- R-e: refuse when local <target> is behind origin/<target>.
-#         Force-pushing in that state regresses origin. Called BEFORE the
-#         `git reset --hard` so the operator's local state is still
-#         available for diagnosis in the error message.
-function verify_local_target_fresh {
-	local TARGET=$1
-	local BEHIND
-	local AHEAD
-
-	BEHIND=$(git rev-list --count "$TARGET..origin/$TARGET" 2>/dev/null || echo "0")
-	AHEAD=$(git rev-list --count "origin/$TARGET..$TARGET" 2>/dev/null || echo "0")
-
-	if [ "$BEHIND" -gt 0 ] && [ "$AHEAD" -gt 0 ]
-		then
-		echo "ERROR: local $TARGET has diverged from origin/$TARGET ($AHEAD ahead, $BEHIND behind)." >&2
-		echo "       Force-pushing now would regress origin/$TARGET." >&2
-		echo "       Recover with: git fetch origin && git checkout $TARGET && git reset --hard origin/$TARGET" >&2
-		return 1
-	fi
-
-	if [ "$BEHIND" -gt 0 ]
-		then
-		echo "ERROR: local $TARGET is $BEHIND commit(s) behind origin/$TARGET." >&2
-		echo "       Force-pushing now would regress origin/$TARGET." >&2
-		echo "       Recover with: git fetch origin && git checkout $TARGET && git reset --hard origin/$TARGET" >&2
-		return 1
-	fi
-
-	return 0
-}
-
-# -- R-f: refuse when the release-branch merge reports
-#         "Already up to date." During a release deploy that's a topology
-#         mismatch — local <target> already contains the release tip,
-#         typically because local is stale relative to origin. Continuing
-#         would silently force-push the stale state.
-function verify_release_merge_not_no_op {
+# -- Advisory only. Report when the release-branch merge is a no-op.
+#    Because `to` resets <target> to origin/<mainbranch> first, an
+#    "Already up to date." here means origin/main ALREADY contains the release
+#    tip — i.e. a prior release cycle's merge-back already landed it. Benign,
+#    so this never blocks: it prints a notice and returns 0.
+function notice_release_merge_no_op {
 	local MERGE_OUTPUT=$1
 	if grep -q "^Already up to date\.$" "$MERGE_OUTPUT"
 		then
-		echo "ERROR: 'git merge $RELEASE_BRANCH' reported 'Already up to date.'" >&2
-		echo "       The release branch is already an ancestor of local $TRUNK_BRANCH." >&2
-		echo "       That is a topology mismatch — local $TRUNK_BRANCH is likely stale." >&2
-		echo "       Refusing to push to avoid regressing origin/$TRUNK_BRANCH." >&2
-		echo "       Recover with: git fetch origin && git checkout $TRUNK_BRANCH && git reset --hard origin/$TRUNK_BRANCH" >&2
-		return 1
+		echo "NOTICE: 'git merge $RELEASE_BRANCH' reported 'Already up to date.'" >&2
+		echo "        origin/$MAIN_BRANCH already contains the release tip, so" >&2
+		echo "        $TRUNK_BRANCH == origin/$MAIN_BRANCH is the correct deploy state." >&2
+		echo "        Continuing." >&2
 	fi
 	return 0
-}
-
-# -- R-a: post-push, verify the release tip is reachable from
-#         origin/<mainbranch>. If not, the release was deployed but never
-#         merged back to main — the silent fix-drop pattern. Hard block.
-#         Escape hatch: GIT_RELEASE_SKIP_ANCESTOR_CHECK=1 (documented for
-#         consumers whose deployment-branch workflows don't merge back).
-function verify_release_in_origin_main {
-	local RELEASE_TIP
-	local MAIN_BRANCH
-
-	RELEASE_TIP=$(git rev-parse "$RELEASE_BRANCH")
-	MAIN_BRANCH=$(mainbranch)
-
-	if [ "${GIT_RELEASE_SKIP_ANCESTOR_CHECK:-0}" = "1" ]
-		then
-		echo "WARNING: GIT_RELEASE_SKIP_ANCESTOR_CHECK=1 set — bypassing R-a ancestor check." >&2
-		echo "         Release tip $RELEASE_TIP was not verified against origin/$MAIN_BRANCH." >&2
-		return 0
-	fi
-
-	# Single-ref refresh — cheap and idempotent. We deliberately do NOT gate
-	# this on FETCHED_ALL: an earlier `fetch --all` may have raced an operator
-	# pushing main from another shell, and R-a is the last line of defense.
-	# Reads one ref only so it does not interfere with FETCHED_ALL semantics.
-	git fetch origin "$MAIN_BRANCH" --quiet
-
-	if git merge-base --is-ancestor "$RELEASE_TIP" "origin/$MAIN_BRANCH"
-		then
-		echo "OK: release tip $RELEASE_TIP is reachable from origin/$MAIN_BRANCH." >&2
-		return 0
-	fi
-
-	echo "ERROR: release tip $RELEASE_TIP is NOT reachable from origin/$MAIN_BRANCH." >&2
-	echo "       The release was pushed to origin/$TRUNK_BRANCH but main has not received it yet." >&2
-	echo "       This is the silent fix-drop pattern. Resolve before declaring deploy done:" >&2
-	echo "         git checkout $MAIN_BRANCH && git pull origin $MAIN_BRANCH \\" >&2
-	echo "         && git merge --no-ff $RELEASE_BRANCH && git push origin $MAIN_BRANCH" >&2
-	echo "       (Or set GIT_RELEASE_SKIP_ANCESTOR_CHECK=1 if your workflow does not merge back.)" >&2
-	return 1
 }
 
 # -- merge the current release candidate into a deployment trigger branch
 #
-# Hardened with four safety guards and one reset-base bug fix (see helper definitions above).
-# Order: defensive checks → R-e (pre-reset) → reset to ORIGIN trunk →
-#        merge → R-f (post-merge) → push → R-a (post-push).
+# <target> is DISPOSABLE: it is rebuilt as (origin/<mainbranch> + release) and
+# force-pushed on every deploy. Nothing on <target> is preserved, by design.
+# Order: defensive checks → reset to origin/<mainbranch> → merge →
+#        no-op notice (advisory) → push. Nothing blocks after the merge.
 function to {
 	TRUNK_BRANCH=$1
 	RELEASE_BRANCH=$(releasebranch)
@@ -547,18 +484,18 @@ function to {
 		return 1
 	fi
 
-	# GUARD R-e: refuse stale local target before we destroy the local state.
-	if ! verify_local_target_fresh "$TRUNK_BRANCH"
+	# Rebuild the target from main. This is the point of the command: <target>
+	# is a deploy trigger, not a source of truth, so its prior history is
+	# discarded and it is re-derived from main every time.
+	#
+	# Use origin/<mainbranch>, NOT local `$(mainbranch)`: `fetchall` above has
+	# just refreshed the remote ref, whereas the operator's local main may be
+	# arbitrarily stale and would silently deploy old code. (Resetting to
+	# origin/<target> instead — as this line briefly did — preserves the
+	# target's history and defeats the rebuild entirely.)
+	if ! git reset --hard "origin/$MAIN_BRANCH"
 		then
-		return 1
-	fi
-
-	# Reset local target to ORIGIN trunk (NOT to local main — fixes the latent
-	# bug where the trunk branch was rewound to whatever the operator's local
-	# main happened to be). R-e above has confirmed origin is sane.
-	if ! git reset --hard "origin/$TRUNK_BRANCH"
-		then
-		echo "ERROR: 'git reset --hard origin/$TRUNK_BRANCH' failed." >&2
+		echo "ERROR: 'git reset --hard origin/$MAIN_BRANCH' failed." >&2
 		return 1
 	fi
 
@@ -578,12 +515,8 @@ function to {
 		return 1
 	fi
 
-	# GUARD R-f: refuse Already-up-to-date for a release-branch deploy.
-	if ! verify_release_merge_not_no_op "$MERGE_OUT"
-		then
-		command rm -f "$MERGE_OUT"
-		return 1
-	fi
+	# Advisory notice only — never blocks. See helper for why.
+	notice_release_merge_no_op "$MERGE_OUT"
 	command rm -f "$MERGE_OUT"
 
 	if ! git push origin "$TRUNK_BRANCH" -f
@@ -592,11 +525,12 @@ function to {
 		return 1
 	fi
 
-	# GUARD R-a: post-push, release tip must be reachable from origin/main.
-	if ! verify_release_in_origin_main
-		then
-		return 1
-	fi
+	# NOTE: there is deliberately no post-push "is the release in origin/main?"
+	# check here. Merge-back happens AFTER the deploy in this workflow, so such
+	# a check runs before the merge-back can possibly have occurred — it would
+	# fail on every deploy and return non-zero despite a successful push.
+	# The correct place to catch a never-merged-back release is when the NEXT
+	# release is cut from main (`roll`/`next`), not at deploy time.
 
 	return 0
 }
