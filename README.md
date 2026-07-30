@@ -51,54 +51,56 @@ Repo Install:
 
 ## Recent Changes
 
-### `git release to <target>` — release-merge-back guards
+### `git release to <target>`
 
-`git release to <target>` now hard-blocks three classes of silent failure
-that previously caused fixes to disappear between releases:
+#### The contract: `<target>` is disposable
 
-- **R-e — stale local target.** Refuses to operate when the local `<target>`
-  branch is behind `origin/<target>`. Force-pushing in that state would
-  regress origin. Recover with:
-  `git fetch origin && git checkout <target> && git reset --hard origin/<target>`.
+`git release to <target>` rebuilds `<target>` as
+`origin/<mainbranch>` + release branch, then force-pushes it. The deploy-trigger
+branches (`dev`/`stage`/`qa`/`production`) hold no history of their own and are
+never a source of truth — anything committed directly to them is discarded on
+the next deploy. That is intentional, and it is why the push is `-f`.
 
-- **R-f — `Already up to date.` is a topology mismatch.** When the merge of
-  the release branch into `<target>` reports `Already up to date.`, the tool
-  refuses to push. The release branch should not already be an ancestor of a
-  clean `<target>` — that signals stale local state. Same recovery as R-e.
+The reset base is `origin/<mainbranch>`, not local `$(mainbranch)`: the remote
+ref has just been refreshed by `fetchall`, whereas the operator's local main may
+be arbitrarily stale and would silently deploy old code.
 
-- **R-a — release tip must be in `origin/<mainbranch>` after push.** After
-  the deploy push, the tool verifies that `git merge-base --is-ancestor
-  <release-tip> origin/<mainbranch>` returns 0. If not, the release was
-  deployed but never merged back to main — the silent fix-drop pattern. The
-  error message includes the recovery commands.
+`to` does not verify anything about main after the push. Merge-back to main
+happens *after* the deploy, so a deploy-time check could only ever report a
+merge-back that has not happened yet.
 
-In addition, a latent bug was fixed: `git release to <target>` previously did
-`git reset --hard $(mainbranch)` which reset the trunk branch to LOCAL main
-instead of `origin/<target>`. It now resets to `origin/<target>` (after R-e
-has confirmed origin is sane).
+#### No-op release merge is a notice, not an error
 
-#### Escape hatch
+If merging the release into `<target>` reports `Already up to date.`, the tool
+prints a `NOTICE` and continues. Since `<target>` was just reset to
+`origin/<mainbranch>`, a no-op merge simply means `origin/main` already contains
+the release tip — normal after a previous cycle's merge-back, or when
+redeploying an already-merged RC.
 
-If you have a workflow where the deploy target is not expected to merge back
-to main (typical for repos that don't use a merge-back-to-main convention), set
-`GIT_RELEASE_SKIP_ANCESTOR_CHECK=1` to bypass R-a only:
-
-```bash
-GIT_RELEASE_SKIP_ANCESTOR_CHECK=1 git release to <target>
-```
-
-R-e and R-f are unconditional safety checks and have no escape hatch — they
-catch states where pushing would regress remote state, which is never the
-intended action.
+> **If you are on a build between `531692e` and this change, upgrade.** That
+> version shipped three checks in `to` that broke normal use:
+>
+> - It reset `<target>` to `origin/<target>` instead of to main, so `<target>`
+>   accumulated history instead of being re-derived from main — the deploy
+>   branch was never actually reset.
+> - **R-e** aborted when local `<target>` was behind `origin/<target>` — i.e. it
+>   defended the branch this command exists to force-push.
+> - **R-a** required the release tip to be in `origin/<mainbranch>` immediately
+>   after the deploy push, and **R-f** hard-failed on `Already up to date.`
+>   These contradicted each other: R-a demanded merge-back, R-f punished it.
+>
+> All three are removed. `GIT_RELEASE_SKIP_ANCESTOR_CHECK` was R-a's escape
+> hatch and is now a no-op — it can be dropped from any wrapper scripts.
 
 #### Scenario scripts
 
-Reproducible failure-mode tests live in `scenarios/`. See
-`scenarios/README.md` for how to run them.
+Reproducible behavior tests live in `scenarios/`. See `scenarios/README.md` for
+how to run them.
 
 #### Known parity gap
 
-These guards live only in `function to`. `git release deploy` (the older
-multi-environment path) is unchanged — it does not see the guards. If you
-rely on `deploy` for production releases, file a ticket to port them.
+`git release deploy` (the older multi-environment path) is unchanged. It still
+does `git reset --hard "$(mainbranch)"` for non-prod environments — the same
+rebuild-from-main intent as `to`, but off **local** main, so it retains the
+staleness hazard that `to` now avoids.
 
