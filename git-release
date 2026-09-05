@@ -1,18 +1,76 @@
 #!/bin/bash
 
+# -- Interactive-input guard ---------------------------------------------------
+#
+# Many commands ask a question with `read`. In an unattended session (an agent,
+# CI, a `curl | bash` pipeline) that has one of two failure modes, and both are
+# worse than refusing to run:
+#
+#   * stdin open but silent (a pipe, a PTY nobody is typing into)
+#       -> `read` blocks forever and the command hangs until it is killed.
+#   * stdin at EOF (`< /dev/null`, a closed pipe)
+#       -> `read` returns non-zero and leaves the variable EMPTY, and the
+#          caller carries on as though the empty string were a real answer.
+#          `init` then writes releases.version="" / releases.current=release-v;
+#          `deploy` used to `git checkout ""`, fail, and hard-reset whatever
+#          branch you happened to be standing on.
+#
+# So we refuse to prompt at all unless stdin is a terminal. Two helpers, because
+# the right unattended behavior differs by what is being asked:
+#
+#   ask          - the answer is a VALUE or a go/no-go for the command's whole
+#                  purpose. There is no safe default, so abort.
+#   ask_optional - the command's real work has already succeeded and this is a
+#                  follow-up offer (fire a deploy webhook, tag after a merge).
+#                  Decline it, say so, and let the command exit 0.
+#
+# Set GIT_RELEASE_ASSUME_TTY=1 to feed answers from a pipe deliberately.
+INTERACTIVE_REQUIRED_EXIT=78
+
+function interactive_available {
+	if [ "${GIT_RELEASE_ASSUME_TTY:-0}" = "1" ]
+		then return 0
+	fi
+	[ -t 0 ]
+}
+
+function ask {
+	if ! interactive_available
+		then
+		echo "ERROR: 'git release ${COMMAND:-?}' needs an answer typed at a terminal," >&2
+		echo "       but stdin is not a terminal. Refusing to continue with an empty" >&2
+		echo "       answer, which would corrupt release state or touch the wrong branch." >&2
+		echo "       Run it in a terminal, use the non-interactive equivalent" >&2
+		echo "       ('git release help'), or set GIT_RELEASE_ASSUME_TTY=1 to pipe" >&2
+		echo "       answers in deliberately." >&2
+		exit $INTERACTIVE_REQUIRED_EXIT
+	fi
+	read -r "$1"
+}
+
+function ask_optional {
+	if ! interactive_available
+		then
+		printf -v "$1" '%s' "n"
+		echo "NOTICE: declining the optional prompt above — stdin is not a terminal." >&2
+		return 0
+	fi
+	read -r "$1"
+}
+
 function init {
 	RELEASE_VERSION=$1
 	if [ -z "$RELEASE_VERSION" ]
 	then
 		echo "Enter Release Version (e.g. 16_07 or 1.0.0):"
-		read -r RELEASE_VERSION
+		ask RELEASE_VERSION
 	fi
 
 	RELEASE_CANDIDATE=$2
 	if [ -z "$RELEASE_CANDIDATE" ]
 	then
 		echo "Enter Release Candidate Version (e.g. 1,2,3... or blank for 0, first roll will be 1):"
-		read -r RELEASE_CANDIDATE
+		ask RELEASE_CANDIDATE
 	fi
 
 	if [ -z "$RELEASE_CANDIDATE" ]
@@ -85,7 +143,7 @@ function checkout {
 	if [ -z "$LATEST" ]
 	then
 		echo "Select Branch to Add: (X = cancel)"
-		read -r CHOICE
+		ask CHOICE
 		if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
 			then exit;
 		fi
@@ -309,8 +367,7 @@ function stage {
 	if [ ! -z "$STAGE_DEPLOY_URL" ]
 	then
 		echo "Do you want to deploy the '$(stagebranch)' branch to the staging branch location? (y/n)"
-		read -r DEPLOY_IT
-
+		ask_optional DEPLOY_IT
 		if [ "$DEPLOY_IT" = "Y" ] || [ "$DEPLOY_IT" = "y" ]
 		then
 			echo "Sending request to ($STAGE_DEPLOY_URL)"
@@ -332,8 +389,7 @@ function qa {
 	if [ ! -z "$QA_DEPLOY_URL" ]
 	then
 		echo "Do you want to deploy the '$(qabranch)' branch to the staging branch location? (y/n)"
-		read -r DEPLOY_IT
-
+		ask_optional DEPLOY_IT
 		if [ "$DEPLOY_IT" = "Y" ] || [ "$DEPLOY_IT" = "y" ]
 		then
 			echo "Sending request to ($QA_DEPLOY_URL)"
@@ -352,26 +408,40 @@ function deploy {
 	if [ -z "$DEPLOY_ENV" ]
 		then
 		echo "Enter Deploy Environment (dev/stage/qa/prod)"
-		read -r DEPLOY_ENV
+		ask DEPLOY_ENV
 	fi
-	if [ "$DEPLOY_ENV" = "prod" ]
+	# Resolve the environment to a branch BEFORE touching the working tree.
+	# An unrecognised or empty environment used to leave TRUNK_BRANCH empty:
+	# `git checkout ""` then failed, execution continued, and the
+	# `git reset --hard` below rewrote whatever branch the operator happened to
+	# be standing on. Nothing downstream may run without a real target branch.
+	case "$DEPLOY_ENV" in
+		prod)  TRUNK_BRANCH=$(mainbranch) ;;
+		stage) TRUNK_BRANCH=$(stagebranch) ;;
+		qa)    TRUNK_BRANCH=$(qabranch) ;;
+		dev)   TRUNK_BRANCH=$(devbranch) ;;
+		*)
+			echo "ERROR: unknown deploy environment '$DEPLOY_ENV'." >&2
+			echo "       Expected one of: dev, stage, qa, prod." >&2
+			return 1
+			;;
+	esac
+
+	if [ -z "$TRUNK_BRANCH" ]
 		then
-		TRUNK_BRANCH=$(mainbranch)
-	fi
-	if [ "$DEPLOY_ENV" = "stage" ]
-		then
-		TRUNK_BRANCH=$(stagebranch)
-	fi
-	if [ "$DEPLOY_ENV" = "qa" ]
-		then
-		TRUNK_BRANCH=$(qabranch)
-	fi
-	if [ "$DEPLOY_ENV" = "dev" ]
-		then
-		TRUNK_BRANCH=$(devbranch)
+		echo "ERROR: no branch is configured for the '$DEPLOY_ENV' environment." >&2
+		echo "       Set it first (e.g. 'git release setdevelopbranch develop')." >&2
+		return 1
 	fi
 
-	git checkout "$TRUNK_BRANCH"
+	# A failed checkout must abort: the reset below is destructive and would
+	# otherwise land on the current branch.
+	if ! git checkout "$TRUNK_BRANCH"
+		then
+		echo "ERROR: 'git checkout $TRUNK_BRANCH' failed. Refusing to reset the" >&2
+		echo "       branch you are standing on." >&2
+		return 1
+	fi
 
 	if [ "$DEPLOY_ENV" = "prod" ]
 		then
@@ -551,7 +621,7 @@ function merge {
 	if [[ "$MERGE_TO_BRANCH" = "$(mainbranch)" ]]
 		then
 		echo "It's customary to Tag when merging to $(mainbranch), shall we tag with release? (y/n)"
-		read -r PUSH
+		ask_optional PUSH
 		if [[ "$PUSH" = "y" ]] || [[ "$PUSH" = "Y" ]]
 			then
 			tag
@@ -574,7 +644,7 @@ function devbranches {
 		then
 			echo "There is no development branch configured (in git config --local releases.devbranch)..."
 			echo "Enter your development branch name:"
-			read -r DEV_BRANCH
+			ask DEV_BRANCH
 			git config --local --replace-all releases.devbranch "$DEV_BRANCH"
 	fi
 	fetchall
@@ -589,7 +659,7 @@ function setdevdeployurl {
 	if [ -z "$DEPLOY_URL" ]
 	then
 		echo "Enter the Rest URL to call to deploy the '$(devbranch)' branch. Blank to disable branch deployment."
-		read -r DEPLOY_URL
+		ask DEPLOY_URL
 	fi
 
 	if [ -z "$DEPLOY_URL" ]
@@ -608,7 +678,7 @@ function stagebranches {
 		then
 			echo "There is no staging branch configured (in git config --local releases.stagebranch)..."
 			echo "Enter your staging branch name:"
-			read -r STAGE_BRANCH
+			ask STAGE_BRANCH
 			git config --local --replace-all releases.stagebranch "$STAGE_BRANCH"
 	fi
 	fetchall
@@ -623,7 +693,7 @@ function qabranches {
 		then
 			echo "There is no QA branch configured (in git config --local releases.qabranch)..."
 			echo "Enter your QA branch name:"
-			read -r QA_BRANCH
+			ask QA_BRANCH
 			git config --local --replace-all releases.qabranch $QA_BRANCH
 	fi
 	fetchall
@@ -637,7 +707,7 @@ function setstagedeployurl {
 	if [ -z "$DEPLOY_URL" ]
 	then
 		echo "Enter the Rest URL to call to deploy the '$(stagebranch)' branch. Blank to disable branch deployment."
-		read -r DEPLOY_URL
+		ask DEPLOY_URL
 	fi
 
 	if [ -z "$DEPLOY_URL" ]
@@ -654,7 +724,7 @@ function setqadeployurl {
 	if [ -z "$DEPLOY_URL" ]
 	then
 		echo "Enter the Rest URL to call to deploy the '$(qabranch)' branch. Blank to disable branch deployment."
-		read -r DEPLOY_URL
+		ask DEPLOY_URL
 	fi
 
 	if [ -z "$DEPLOY_URL" ]
@@ -690,7 +760,7 @@ function devfeature {
 	fi
 
 	echo "Push '$DEV_BRANCH' up to Origin? (y/n)"
-	read -r PUSH
+	ask PUSH
 	if [ "$PUSH" = "y" ] || [ "$PUSH" = "Y" ]
 		then
 		git push origin "$DEV_BRANCH"
@@ -699,8 +769,7 @@ function devfeature {
 		if [ ! -z "$DEV_DEPLOY_URL" ]
 		then
 			echo "Do you want to deploy the '$(devbranch)' branch to the dev branch location? (y/n)"
-			read -r DEPLOY_IT
-
+			ask_optional DEPLOY_IT
 			if [ "$DEPLOY_IT" = "Y" ] || [ "$DEPLOY_IT" = "y" ]
 			then
 				echo "Sending request to ($DEV_DEPLOY_URL)"
@@ -733,8 +802,7 @@ function updatelocal {
 		echo "y - to stash and restore after completed"
 		echo "n - to pull on top of your local changes - may cause conflicts"
 		echo "x to exit now"
-		read -r STASH_IT
-
+		ask STASH_IT
 		if [ "$STASH_IT" == "Y" ] ||  [ "$STASH_IT" == "y" ]
 		then
 			echo "Stashing local changes"
@@ -770,7 +838,7 @@ function updatelocal {
 				echo "Local Branch $BRANCH is Ahead of origin."
 				echo "Not Pulling"
 				echo "Press Enter to Continue"
-				read -r NOTHING
+				ask_optional NOTHING
 			fi
 		else
 			echo "Nothing to Update"
@@ -797,7 +865,7 @@ function newfeature {
 	echo "1 - feature/"
 	echo "2 - bugfix/"
 	echo "3 - hotfix/"
-	read -r THE_KIND
+	ask THE_KIND
 	if [ "$THE_KIND" = "0" ]
 	then
 		PREFIX=""
@@ -815,7 +883,7 @@ function newfeature {
 
 	echo "Enter a descriptive name for your feature."
 	echo "(e.g. 'ISSUE-33_IncreaseTitleFont')"
-	read -r TITLE
+	ask TITLE
 	if [ -z "$TITLE" ]
 	then
 		exit
@@ -847,7 +915,7 @@ function newfeature {
 
 	echo "Create the above branch? (y/n)"
 
-	read -r CREATE_IT
+	ask CREATE_IT
 	if [ "$CREATE_IT" = "Y" ] || [ "$CREATE_IT" = "y" ]
 	then
 		echo "git fetch --all"
@@ -886,8 +954,7 @@ function pushfeature {
 
 
 	echo "Is this the branch you are trying to push? (y/n)"
-	read -r IS_THIS_IT
-
+	ask IS_THIS_IT
 	if [ ! "$IS_THIS_IT" = "Y" ] && [ ! "$IS_THIS_IT" = "y" ]
 	then
 		echo "Be Sure to Checkout the Branch That You Are Attempting to Push."
@@ -928,7 +995,7 @@ function pushfeature {
 		echo "Please review and confirm before pushing the following changes:"
 		echo "$PF_AHEAD"
 		echo "Continue pushing '$FEATURE_CHOSEN' to origin? (y/n)"
-		read -r PUSH_AHEAD
+		ask PUSH_AHEAD
 		if [ "$PUSH_AHEAD" = "Y" ] || [ "$PUSH_AHEAD" = "y" ]
 		then
 			echo "Pushing '$FEATURE_CHOSEN' to origin"
@@ -977,8 +1044,7 @@ function pushfeature {
 
 
 	echo "Do you want to try to push this feature to the latest release candidate for '$(current)'? (y/n)"
-	read -r IS_IT
-
+	ask IS_IT
 	if [ "$IS_IT" = "Y" ] || [ "$IS_IT" = "y" ]
 	then
 		echo "Searching For Latest Release Info"
@@ -1012,7 +1078,7 @@ function pushfeature {
 			echo "2 next - branches from '$(releasebranch)' to create '$(current)rc$((NEXT_REL_CANDIDATE+1))'; easier to diff changes between release candidates"
 			echo "3 append - merges on top of current release candidate '$(releasebranch)' - not recommended if you add a new feature. See 'help' for details."
 		fi
-		read -r ROLL_IT
+		ask ROLL_IT
 		if [ "$ROLL_IT" = "1" ]
 		then
 			echo "Rolling new release from the main branch"
@@ -1043,8 +1109,7 @@ function pushfeature {
 		if [ "$ROLL_SUCCESSFUL" = "0" ]
 		then
 			echo "Do you want to deploy this release candidate into the '$(stagebranch)' branch? (y/n)"
-			read -r STAGE_IT
-
+			ask STAGE_IT
 			if [ "$STAGE_IT" = "Y" ] || [ "$STAGE_IT" = 'y' ]
 			then
 				echo "Putting release candidate into '$(stagebranch)'.."
@@ -1077,7 +1142,7 @@ function releasebranches {
 function createdevrelease {
 	echo "createrelease"
 	echo "Enter Current Release Number:"
-	read -r RELEASE_NUMBER
+	ask RELEASE_NUMBER
 	init "$RELEASE_NUMBER-devrefresh" 0
 	DEV_BRANCHES=$(devbranches)
 	for BRANCH in $DEV_BRANCHES
@@ -1099,21 +1164,21 @@ function movedevbranch {
 
 function cleanup {
 	echo "Did we want to clean up the release branches?"
-	read -r CHOICE
+	ask CHOICE
 	if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
 		then
 		cleanrelease "$@"
 	fi
 
 	echo "Did we want to purge the local merged branches?"
-	read -r CHOICE
+	ask CHOICE
 	if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
 		then
 		cleanupmergedlocalbranches
 	fi
 
 	echo "Did we want to purge the remote merged branches?"
-	read -r CHOICE
+	ask CHOICE
 	if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
 		then
 		cleanupmergedremotebranches
@@ -1142,7 +1207,7 @@ function cleanrelease {
 		do
 			RELEASE_ONLY=${OLD_RELEASE_BRANCH##*/}
 		    echo "Remove: $RELEASE_ONLY (y/n)"
-		    read -r CHOICE
+		    ask CHOICE
 		    if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ]
 			then
 				git push origin --delete "$RELEASE_ONLY"
@@ -1171,7 +1236,8 @@ function cleanupmergedlocalbranches {
 			git branch -d "$RMM_BRANCH"
 		else
 			echo "$RMM_BRANCH shows to be merged to the main branch, remove? (y/n)"
-			read -r CHOICE
+				echo "  (y = this branch only; auto = this and every remaining LOCAL branch, no further prompts)"
+			ask CHOICE
 			if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ] || [ "$CHOICE" = "auto" ]
 			then
 				git branch -d "$RMM_BRANCH"
@@ -1186,7 +1252,7 @@ function cleanupmergedremotebranches {
 	echo "IMPORTANT: You should have the most current release branch checked out"
 	echo "IMPORTANT: You should have have already run 'git release deploy' to have the main branch merged in"
 	echo "Are these things handled? (y/n)"
-	read -r CONFIRMATION
+	ask CONFIRMATION
 	if [ "$CONFIRMATION" = "Y" ] || [ "$CONFIRMATION" = "y" ]
 		then echo "Thanks for Confirming"
 		else exit
@@ -1199,19 +1265,23 @@ function cleanupmergedremotebranches {
 	do
 		echo "Pulling Branch: $RMM_BRANCH"
 		RMM_BRANCH_ONLY=${RMM_BRANCH#*remotes/origin/}
-		RELEASE_BRANCHES=$(branches)
-		if [[ $RELEASE_BRANCHES == *"$RMM_BRANCH"* ]]
+		# Space-pad the list so a whole-entry match is possible; `branches`
+		# emits one ref per line.
+		RELEASE_BRANCHES=" $(branches | tr '\n' ' ') "
+		# Compare against "origin/<name>", which is the form releases.branches
+		# stores. Matching on $RMM_BRANCH ("remotes/origin/<name>") never hit,
+		# so branches in the CURRENT release were offered for deletion.
+		if [[ "$RELEASE_BRANCHES" == *" origin/$RMM_BRANCH_ONLY "* ]]
 			then
-				echo "Found in current release !!! $RMM_BRANCH"
-		fi
-		if [[ $RELEASE_BRANCHES != *"$RMM_BRANCH"* ]]
-			then
+				echo "Skipping $RMM_BRANCH_ONLY — it is in the current release."
+		else
 			if [ "$CHOICE" = "auto" ]
 				then
 				git push origin --delete "$RMM_BRANCH_ONLY"
 			else
 				echo "$RMM_BRANCH_ONLY shows to be merged to the main branch, remove? (y)"
-				read -r CHOICE
+				echo "  (y = this branch only; auto = this and every remaining REMOTE branch, no further prompts)"
+				ask CHOICE
 				if [ "$CHOICE" = "Y" ] || [ "$CHOICE" = "y" ] || [ "$CHOICE" = "auto" ]
 					then
 					git push origin --delete "$RMM_BRANCH_ONLY"
@@ -1241,7 +1311,7 @@ function push {
 function dump {
 	RELEASE_BRANCH="$(releasebranch)"
 	echo "Dumping $RELEASE_BRANCH, correct? (Y/N):"
-	read -r DUMP
+	ask DUMP
 	if [ "$DUMP" = "Y" ]
 	then
 		git reset --hard
@@ -1331,12 +1401,11 @@ function findfeature {
 		echo "1 List all feature/ branches"
 		echo "2 List all bugfix/ branches"
 		echo "3 List all hotfix/ branches"
-		read -r SEARCH_TYPE
-
+		ask SEARCH_TYPE
 		if [ "$SEARCH_TYPE" = "0" ]
 	    then
 			echo "Enter part of a Feature Branch name: (we will search for it) "
-			read -r FEATURE_QUERY
+			ask FEATURE_QUERY
 		elif [ "$SEARCH_TYPE" = "1" ]
 		then
 			FEATURE_QUERY="feature/"
@@ -1378,7 +1447,7 @@ function findfeature {
 			OPTION=$((OPTION+1))
 		done
 		echo "Select Branch: (X = cancel)"
-		read -r CHOICE
+		ask CHOICE
 		if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
 			then exit;
 		fi
@@ -1447,6 +1516,11 @@ function add {
 		echo "No Release is Initialized"
 		exit 1;
 	fi
+	if [ -z "$BRANCH_TO_ADD" ]
+		then
+		echo "ERROR: no branch given. Usage: git release add <ref>, e.g. origin/feature/login" >&2
+		return 1
+	fi
 	git config --add releases.branches "$BRANCH_TO_ADD"
 }
 
@@ -1463,7 +1537,7 @@ function rm {
 		OPTION=$((OPTION+1))
 	done
 	echo "Select Branch to Remove: (X = cancel)"
-	read -r CHOICE
+	ask CHOICE
 	if [ "$CHOICE" = "X" ] || [ "$CHOICE" = "x" ] || [ -z "$CHOICE" ]
 		then exit;
 	fi
@@ -1560,19 +1634,9 @@ function devdeployurl {
 	git config --get-all releases.devdeployurl
 }
 
-function stagebranch {
-	# "Used to fetch the stored staging branch"
-	git config --get-all releases.stagebranch
-}
-
 # -- util - get the url to call to deploy the stage branch
 function stagedeployurl {
 	git config --get-all releases.stagedeployurl
-}
-
-function qabranch {
-	# "Used to fetch the stored qa branch"
-	git config --get-all releases.qabranch
 }
 
 # -- util - get the url to call to deploy the qa branch
@@ -1708,36 +1772,49 @@ git release — Git Flow-style release candidate branch management
 USAGE
     git release <command> [arguments]
 
+    [tty] marks a command that asks a question. It requires a terminal and
+    exits 78 when stdin is not one, rather than proceeding on an empty answer.
+    Set GIT_RELEASE_ASSUME_TTY=1 to pipe answers in deliberately.
+
 GETTING STARTED
-    init [version] [candidate]      Initialize release versioning in git config
+    init <version> <candidate>      Initialize release versioning in git config
+                                    [tty] if either argument is omitted
     status                          Show current version, RC, and branch list
     upgrade                         Update git-release to the latest version
 
 FEATURE BRANCHES
-    newfeature <name>               Create a branch from main and push to origin
-    checkoutfeature                 Find and checkout a remote feature branch locally
-    pushfeature                     Push branch, optionally merge to dev/roll RC/stage
-    devfeature <branch>             Merge a feature into the develop branch and push
+    newfeature <name>               Create a branch from main and push to origin [tty]
+    checkoutfeature                 Find and checkout a remote feature branch locally [tty]
+    pushfeature                     Push branch, optionally merge to dev/roll RC/stage [tty]
+    devfeature <branch>             Merge a feature into the develop branch and push [tty]
 
 RELEASE MANAGEMENT
     add <branch>                    Add a remote branch to the release list
-    feature <search>                Search for and add a remote branch to the release
-    rm <branch>                     Remove a branch from the release list
-    remove <branch>                 Remove a branch from the release list (same as rm)
+    feature <search>                Search for and add a remote branch to the release [tty]
+                                    (non-interactive equivalent: add <ref>)
+    rm                              Pick a branch to remove from the release list [tty]
+                                    (takes no argument; use 'remove <ref>')
+    remove <branch>                 Remove a branch from the release list by exact ref
     roll                            Create a new RC branch from main with all release branches
     next                            Create a new RC branch from the current RC (carries fixes forward)
     append                          Re-merge all release branches into the current RC
-    duplicate                       Copy the current release config into a new version
-    checkout [true]                 Switch between release branches (true = auto-pick latest RC)
-    dump                            Delete the current RC branch and roll back the candidate number
+    duplicate                       Copy the current release config into a new version [tty]
+    checkout [true]                 Switch between release branches [tty] without 'true'
+                                    (true = auto-pick latest RC, non-interactive)
+    dump                            Delete the current RC branch and roll back the candidate number [tty]
     push                            Push the current release branch to origin
 
 DEPLOYMENT
     stage                           Merge RC into the staging branch and push
+                                    (a configured deploy webhook is offered, and
+                                    declined automatically without a terminal)
     qa                              Merge RC into the QA branch and push
-    deploy                          Merge RC into main, push, and offer to tag
+                                    (webhook offered as with 'stage')
+    deploy <dev|stage|qa|prod>      Merge RC into an environment branch and push
+                                    [tty] if the environment is omitted; prefer 'to <branch>'
     to <branch>                     Merge RC into an arbitrary branch and push
-    merge                           Merge RC into main (without tagging)
+    merge <branch>                  Merge RC into a branch; offers to tag when that
+                                    branch is main (declined without a terminal)
     tag                             Tag the current release on main
 
 BRANCH INSPECTION
@@ -1757,23 +1834,27 @@ CONFIGURATION
     setqadeployurl                  Set a webhook URL called after pushing to QA
 
 RELEASE FILE
-    edit                            Open the release file in your editor
+    edit                            Open the release file in nano, then hard-reset [tty]
     writeout                        Write the current branch list to the releases/ directory
-    readin                          Read the branch list from the releases/ directory
+    readin                          Read the branch list from releases/, then hard-reset
 
 CLEANUP
-    cleanup                         Delete local and remote release branches for a version
-    cleanrelease                    Delete a single release branch (local + remote)
-    cleanupmergedlocalbranches      Delete local branches already merged into main
-    cleanupmergedremotebranches     Delete remote branches already merged into main
-    purgelocalbranches              Delete all local branches except main
+    cleanup                         Delete local and remote release branches for a version [tty]
+    cleanrelease                    Delete a single release branch (local + remote) [tty]
+    cleanupmergedlocalbranches      Delete local branches already merged into main [tty]
+                                    (answering 'auto' deletes all the rest unprompted)
+    cleanupmergedremotebranches     Delete remote branches already merged into main [tty]
+                                    (answering 'auto' deletes all the rest unprompted)
+    purgelocalbranches              Delete all local branches except main (no prompt)
 
 MAINTENANCE
-    updatelocal                     Fast-forward all local branches that are behind origin
-    reset                           Clear all release config from git config
+    updatelocal                     Fast-forward all local branches that are behind origin [tty]
+    reset                           git reset --hard: DISCARDS uncommitted work.
+                                    It does NOT clear release config; for that use
+                                    'git config --local --remove-section releases'
 
 EXPERIMENTAL
-    createdevrelease                Create a release branch from the develop branch
+    createdevrelease                Create a release branch from the develop branch [tty]
     movedevbranch                   Point the develop branch at the current release branch
 
 TYPICAL WORKFLOW
@@ -1783,6 +1864,19 @@ TYPICAL WORKFLOW
     3. git release roll
     4. git release stage
     5. git release deploy
+
+UNATTENDED USE
+    These run without a terminal and are safe to script:
+      status, deploystatus, version, candidate, current, branches,
+      releasebranch, nextreleasebranch, releasebranches,
+      init <version> <candidate>, add <ref>, remove <ref>, setcandidate <n>,
+      set{main,stage,qa,develop}branch <name>, set*deployurl <url>,
+      roll, next, append, push, to <branch>, stage, qa, merge <branch>, tag,
+      deploy <env>, checkout true, writeout, upgrade, help
+
+    roll/next/append exit 1 and skip the push when a merge conflicts, so check
+    the exit code and confirm the branch reached origin:
+      git ls-remote --heads origin "$(git release releasebranch)"
 
 HOOKS
     Place an executable script named afterversioncommit.sh in the repo root.
@@ -1811,6 +1905,18 @@ if [ -z "$COMMAND" ]
 	echo " "
 	echo ' use `git release status` to see what the current settings are.'
 	status
+	exit 0
+fi
+
+# Dispatch by function name. This used to be a bare `$COMMAND "$@"`, which
+# handed any unrecognised word to the shell: `git release echo hi` ran `echo`,
+# and a typo surfaced as "command not found" instead of a usage error. Only
+# functions defined in this script are dispatchable.
+if ! declare -F "$COMMAND" > /dev/null
+	then
+	echo "ERROR: '$COMMAND' is not a git release command." >&2
+	echo "       Run 'git release help' for the command list." >&2
+	exit 64
 fi
 
 $COMMAND "$@"

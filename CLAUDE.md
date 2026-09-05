@@ -27,9 +27,36 @@ Release files are also written to a `releases/` directory in the repo as a backu
 - **`FETCHED_ALL` flag**: Prevents redundant `git fetch --all` calls when functions invoke each other within a single command.
 - **Merge conflict detection**: After each merge, checks `git diff --name-only --diff-filter=U` and halts auto-push if conflicts exist.
 - **`afterversioncommit.sh` hook**: Optional repo-root script executed after the version file commit. Used to update package.json, composer.json, etc. Exit code 1 is tolerated during `append` (handles "nothing to commit" case).
-- **Interactive prompts**: Many commands use `read` for user confirmation and array-based menus for branch selection.
+- **Interactive prompts**: Many commands ask questions. They never call `read` directly — they go through `ask` or `ask_optional`, which refuse to prompt unless stdin is a terminal. See "Unattended use" below.
 - **Branch-name helpers return LOCAL refs.** `mainbranch`, `stagebranch`, `qabranch`, `devbranch` all return the *local* branch name (e.g. `main`). Any guard that compares against remote state must explicitly prepend `origin/`. Easy to forget.
 - **`function rm` shadows the filesystem `rm` binary** inside this script. Use `command rm` when you actually want to delete a file from inside a function (the `to` function does this for its merge-output tempfile).
+
+### Unattended use (agents, CI)
+
+Prompting is funnelled through two helpers defined at the top of the script, so
+an unattended run can never proceed on an empty answer:
+
+| Helper | Used for | Behavior with no terminal |
+|--------|----------|---------------------------|
+| `ask VAR` | a value, or a go/no-go for the command's whole purpose (`init`, `dump`, `deploy`'s environment, every picker) | prints an error and `exit 78` |
+| `ask_optional VAR` | a follow-up offer after the real work already succeeded (deploy webhooks in `stage`/`qa`/`devfeature`, the tag offer in `merge`, the pause in `updatelocal`) | sets the variable to `n`, prints `NOTICE`, continues so the command still exits 0 |
+
+`interactive_available` is the single test: `[ -t 0 ]`, overridable with
+`GIT_RELEASE_ASSUME_TTY=1` for deliberate piping.
+
+**Never call `read` directly in a new command.** Pick `ask` or `ask_optional`
+by asking whether an unattended caller would rather see a failure or a
+completed command. The two failure modes this prevents are both real and were
+both reachable: with stdin open the command hangs forever; with stdin at EOF
+`read` returns non-zero and leaves the variable **empty**, and the caller
+carries on. That second mode is how `init` came to write
+`releases.current=release-v`, and how `deploy` with no environment argument
+hard-reset whatever branch the operator was standing on.
+
+Because `stage`, `qa`, `merge <branch>` and `deploy <env>` now decline their
+optional prompts instead of blocking, the full cycle
+`roll` → `to <target>` → `merge <main>` → `tag` runs unattended and exits 0
+throughout. `scenarios/scenario_d_agent_safety.sh` asserts exactly that.
 
 ### Guards (`function to` hardening)
 
@@ -60,7 +87,7 @@ The no-op notice is advisory *because* the reset base is main: `Already up to da
 
 `function deploy` (the older multi-env code path) is a parity gap: it still does `git reset --hard "$(mainbranch)"` for non-prod envs — same rebuild-from-main intent as `to`, but off LOCAL main, so it retains the staleness hazard `to` now avoids. `function status`'s `git branch --merged $(mainbranch) | grep $(releasebranch)` check is informational and uses LOCAL main.
 
-Scenario scripts under `scenarios/` build self-contained sandbox repos and exercise each guard. Run `scenarios/scenario_*.sh` to verify.
+Scenario scripts under `scenarios/` build self-contained sandbox repos and exercise each guard. Run `scenarios/scenario_*.sh` to verify. `scenario_d_agent_safety.sh` covers the unattended guards above rather than `to`.
 
 ### Core Command Groups
 - **Release lifecycle**: `init`, `roll` (new RC from main), `next` (new RC from current RC), `append` (re-merge into current RC), `dump` (delete current RC)
@@ -82,7 +109,7 @@ git release [command] [args]
 ```
 
 ### Making Changes
-Edit `git-release` directly. Functions are defined at the top level and dispatched via a `case` statement at the bottom of the script. The command name maps directly to a function name (e.g., `git release roll` calls the `roll()` function).
+Edit `git-release` directly. Functions are defined at the top level; the command name maps directly to a function name (e.g., `git release roll` calls the `roll()` function). Dispatch at the bottom of the script guards with `declare -F "$COMMAND"` and exits 64 for anything that is not a defined function — it used to be a bare `$COMMAND "$@"`, which handed unrecognised words to the shell (`git release echo hi` ran `echo`). Adding a command means adding a function; nothing else is needed, but nothing outside the file is reachable.
 
 ### Branch Naming Convention
 RC branches follow: `release-v{version}-rc{candidate}` (e.g., `release-v1.0.0-rc3`)
