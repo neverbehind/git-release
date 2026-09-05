@@ -14,6 +14,7 @@ plugin discovery. Each script is standalone and can be run on its own.
 # From the repo root:
 ./scenarios/scenario_b_target_rebuilt_from_main.sh
 ./scenarios/scenario_c_no_op_merge_notice.sh
+./scenarios/scenario_d_agent_safety.sh
 ```
 
 Each script prints `PASS` / `FAIL` lines and a final `RESULT` summary. Exit
@@ -44,6 +45,7 @@ GIT_RELEASE_BIN=/path/to/git-release ./scenarios/scenario_b_target_rebuilt_from_
 |--------|--------------------|------------------|
 | `scenario_b_target_rebuilt_from_main.sh` | rebuild-from-main contract | `<target>` is re-derived from `origin/main` + release: junk on `<target>` is discarded, a stale LOCAL main is not used, and a deploy that precedes merge-back exits 0 silently. |
 | `scenario_c_no_op_merge_notice.sh` | no-op release merge | Tool prints a `NOTICE` and still deploys; `origin/<target>` ends up at `origin/main`. |
+| `scenario_d_agent_safety.sh` | unattended (agent/CI) guards | Prompting commands exit 78 instead of acting on an empty answer; `deploy` with a bad environment leaves the current branch untouched; dispatch refuses non-commands; `add` rejects an empty ref; remote cleanup skips branches in the current release; `roll`→`to`→`merge`→`tag` all exit 0 with stdin detached. |
 
 ## Why a sandbox repo and not a real-repo clone
 

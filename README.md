@@ -61,6 +61,39 @@ Source and details: https://github.com/neverbehind/git-release-skills
 - Versioning other systems can be achieved by adding a `afterversioncommit.sh` file to the repo, this file is executed after the version file is created, and committed to the repo. This is helpful for projects that use NPM packager, or composer, and you want to set the version in a package.json or composer.json file. 
 
 
+## Unattended use (agents, CI)
+
+Commands that ask a question now require a terminal. Without one they print an
+error and exit **78** rather than reading an empty answer and carrying on:
+
+```
+$ git release init < /dev/null
+Enter Release Version (e.g. 16_07 or 1.0.0):
+ERROR: 'git release init' needs an answer typed at a terminal, ...
+```
+
+Previously that call silently wrote `releases.version=""` and
+`releases.current=release-v`, and `git release deploy` with no environment
+would `git checkout ""`, fail, and then hard-reset whatever branch you were
+standing on. Pipe answers in deliberately with `GIT_RELEASE_ASSUME_TTY=1`.
+
+Optional follow-up prompts — the deploy webhooks offered by `stage`/`qa`, the
+tag offer after `merge <main>` — are *declined* rather than fatal, so the work
+those commands already did still reports success. The full cycle runs
+unattended:
+
+```bash
+git release add origin/feature/login
+git release roll          # exits 1 and skips the push if a merge conflicts
+git release to dev
+git release merge main
+git release tag
+```
+
+`git release help` marks every interactive command with `[tty]` and lists the
+unattended-safe set. Unrecognised commands now exit 64 instead of being handed
+to the shell — `git release echo hi` used to run `echo`.
+
 ## Recent Changes
 
 ### `git release to <target>`
