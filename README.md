@@ -16,6 +16,18 @@ Repo Install:
 * `bash install.sh`
 
 
+*Claude Code Skills:*
+
+If you drive this tool from [Claude Code](https://claude.com/claude-code), install the companion skills plugin so Claude knows the release lifecycle, the deploy-trigger contract, and which commands block on a prompt:
+
+```
+/plugin marketplace add neverbehind/git-release-skills
+/plugin install git-release@git-release-skills
+```
+
+Source and details: https://github.com/neverbehind/git-release-skills
+
+
 *Usage Quick Start:*
 
 > Most Common Process: Initialize release, add features, then create a the release by merging all branches in.
