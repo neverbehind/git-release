@@ -29,7 +29,7 @@ Release files are also written to a `releases/` directory in the repo as a backu
 - **`afterversioncommit.sh` hook**: Optional repo-root script executed after the version file commit. Used to update package.json, composer.json, etc. Exit code 1 is tolerated during `append` (handles "nothing to commit" case).
 - **Interactive prompts**: Many commands ask questions. They never call `read` directly — they go through `ask` or `ask_optional`, which refuse to prompt unless stdin is a terminal. See "Unattended use" below.
 - **Branch-name helpers return LOCAL refs.** `mainbranch`, `stagebranch`, `qabranch`, `devbranch` all return the *local* branch name (e.g. `main`). Any guard that compares against remote state must explicitly prepend `origin/`. Easy to forget.
-- **`function rm` shadows the filesystem `rm` binary** inside this script. Use `command rm` when you actually want to delete a file from inside a function (the `to` function does this for its merge-output tempfile).
+- **`function rm` shadows the filesystem `rm` binary** inside this script. Use `command rm` when you actually want to delete a file from inside a function (`to` does this for its merge-output tempfile, `upgrade` for its download tempfile).
 
 ### Unattended use (agents, CI)
 
@@ -88,6 +88,24 @@ The no-op notice is advisory *because* the reset base is main: `Already up to da
 `function deploy` (the older multi-env code path) is a parity gap: it still does `git reset --hard "$(mainbranch)"` for non-prod envs — same rebuild-from-main intent as `to`, but off LOCAL main, so it retains the staleness hazard `to` now avoids. `function status`'s `git branch --merged $(mainbranch) | grep $(releasebranch)` check is informational and uses LOCAL main.
 
 Scenario scripts under `scenarios/` build self-contained sandbox repos and exercise each guard. Run `scenarios/scenario_*.sh` to verify. `scenario_d_agent_safety.sh` covers the unattended guards above rather than `to`.
+
+### `upgrade` replaces a running script
+
+`upgrade` and `install.sh` download to a temp file **in the target directory**
+and `mv` it into place. Never `curl -o` onto the live path: that truncates and
+rewrites the same inode, and bash — which reads a script incrementally — resumes
+at a stale byte offset in the new content. A real upgrade printed
+`line 1817: syntax error near unexpected token ')'` pointing at help *text*,
+after a download that had actually succeeded. `mv` within one directory is an
+atomic rename, so the running process keeps its old inode and finishes cleanly.
+
+Both paths validate before installing (`curl -f`, non-empty, `bash -n`) so a
+404 page or a truncated transfer cannot replace a working tool, and both honor
+`GIT_RELEASE_UPGRADE_URL` / `GIT_RELEASE_INSTALL_PATH` — which is how
+`scenario_e_upgrade_atomicity.sh` tests all of this with `file://` URLs and no
+network. That scenario's fixture shifts content near the **top** of the
+replacement file: padding appended at the end leaves the offset bash is reading
+identical in both files and the test passes vacuously.
 
 ### Core Command Groups
 - **Release lifecycle**: `init`, `roll` (new RC from main), `next` (new RC from current RC), `append` (re-merge into current RC), `dump` (delete current RC)
