@@ -1758,10 +1758,73 @@ function deploystatus {
 	done
 }
 
+# -- replace the installed copy of this script with the latest published one.
+#
+# Overrides, both mainly for testing but useful for a non-default install:
+#   GIT_RELEASE_UPGRADE_URL   where to fetch from (default: GitHub main)
+#   GIT_RELEASE_INSTALL_PATH  what to replace   (default: ~/bin/git-release)
 function upgrade {
-  curl https://raw.githubusercontent.com/neverbehind/git-release/main/git-release -o ~/bin/git-release
+	UPGRADE_URL=${GIT_RELEASE_UPGRADE_URL:-https://raw.githubusercontent.com/neverbehind/git-release/main/git-release}
+	INSTALL_PATH=${GIT_RELEASE_INSTALL_PATH:-$HOME/bin/git-release}
+	INSTALL_DIR=$(dirname "$INSTALL_PATH")
 
-  chmod +x ~/bin/git-release
+	if ! mkdir -p "$INSTALL_DIR"
+		then
+		echo "ERROR: cannot create $INSTALL_DIR" >&2
+		return 1
+	fi
+
+	# Download BESIDE the target, never over it. `curl -o <live path>` truncates
+	# and rewrites the same inode while bash is still reading this very script,
+	# so the running process resumes at a stale byte offset — landing mid-way
+	# through the new file and dying with a bogus syntax error even though the
+	# download succeeded. A temp file in the same directory plus `mv` is an
+	# atomic rename: the replacement gets a new inode and the running process
+	# finishes reading the old one cleanly.
+	#
+	# Same directory matters: `mv` across filesystems is a copy, not a rename.
+	TMP_PATH="$INSTALL_DIR/.git-release.upgrade.$$"
+
+	# -f so an HTTP error is a failure rather than a 404 page written over the
+	# tool, -L to follow redirects, -sS to stay quiet but still report errors.
+	if ! curl -fsSL "$UPGRADE_URL" -o "$TMP_PATH"
+		then
+		echo "ERROR: download failed from $UPGRADE_URL" >&2
+		echo "       Your existing install is untouched." >&2
+		# `rm` is a function in this script; use the real binary.
+		command rm -f "$TMP_PATH"
+		return 1
+	fi
+
+	# Never install something we cannot run. Both checks below have caught a
+	# real failure mode: a truncated transfer, and an error page served with a
+	# 200 status.
+	if [ ! -s "$TMP_PATH" ]
+		then
+		echo "ERROR: downloaded an empty file. Your existing install is untouched." >&2
+		command rm -f "$TMP_PATH"
+		return 1
+	fi
+
+	if ! bash -n "$TMP_PATH" 2>/dev/null
+		then
+		echo "ERROR: the downloaded file is not valid bash." >&2
+		echo "       Your existing install is untouched." >&2
+		command rm -f "$TMP_PATH"
+		return 1
+	fi
+
+	chmod +x "$TMP_PATH"
+
+	if ! mv -f "$TMP_PATH" "$INSTALL_PATH"
+		then
+		echo "ERROR: could not move the new version into $INSTALL_PATH" >&2
+		command rm -f "$TMP_PATH"
+		return 1
+	fi
+
+	echo "git-release upgraded: $INSTALL_PATH"
+	return 0
 }
 
 function help {
@@ -1781,6 +1844,8 @@ GETTING STARTED
                                     [tty] if either argument is omitted
     status                          Show current version, RC, and branch list
     upgrade                         Update git-release to the latest version
+                                    (GIT_RELEASE_INSTALL_PATH overrides the
+                                    target, default ~/bin/git-release)
 
 FEATURE BRANCHES
     newfeature <name>               Create a branch from main and push to origin [tty]

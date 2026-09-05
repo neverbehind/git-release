@@ -96,6 +96,26 @@ to the shell — `git release echo hi` used to run `echo`.
 
 ## Recent Changes
 
+### `git release upgrade` no longer corrupts itself
+
+`upgrade` and `install.sh` used to `curl -o` straight onto the installed path.
+That truncates and rewrites the same inode while bash is still reading the
+running script, so a successful upgrade could still print something like:
+
+```
+~/bin/git-release: line 1817: syntax error near unexpected token `)'
+```
+
+The download had worked — that line is help text, not code. Both now download to
+a temp file beside the target and `mv` it into place (an atomic rename), and
+both refuse to install anything that is missing, empty, or not valid bash, so a
+404 page can no longer land on top of a working tool. `install.sh` also stops
+appending a duplicate `PATH` line every time you re-run it.
+
+Set `GIT_RELEASE_INSTALL_PATH` to install or upgrade somewhere other than
+`~/bin/git-release`.
+
+
 ### `git release to <target>`
 
 #### The contract: `<target>` is disposable
