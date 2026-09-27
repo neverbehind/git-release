@@ -29,10 +29,6 @@ note "Setup: prod-live at M0, pushed to origin"
 create_branch_from prod-live main
 push_branch prod-live
 
-note "Setup: add commit P1 to prod-live and push (must be discarded later)"
-commit_on   prod-live    p1.txt   "p1"   "prod-live: P1"
-push_branch prod-live
-
 note "Setup: feature branch off main, init release, add feature, roll"
 create_branch_from feature/derived main
 commit_on   feature/derived   add.txt   "addition"   "feature: small addition"
@@ -42,6 +38,13 @@ run_release init v1.0.0 0
 run_release add origin/feature/derived
 run_release roll <<< "n"
 RELEASE_BRANCH=$(cd "$REPO" && "$GIT_RELEASE_BIN" releasebranch | tr -d '\n')
+
+# The stray prod-live commit is added AFTER the roll: roll/next refuse to cut
+# while production carries commits not in main (check_mergeback, scenario F).
+note "Setup: add commit P1 to prod-live and push (must be discarded later)"
+commit_on   prod-live    p1.txt   "p1"   "prod-live: P1"
+push_branch prod-live
+
 
 note "Setup: merge release into main and push — origin/main now has release tip"
 (
