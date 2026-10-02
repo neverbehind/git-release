@@ -173,7 +173,179 @@ function checkout {
 }
 
 # - creates a new release candidate by branching from the main branch and merging in the added features
+# -- merge-back guard for `roll` / `next` --------------------------------------
+#
+# The deploy target is rebuilt as (origin/main + release) on every `to`, so a
+# release that reached production but was never merged back into main is
+# silently DROPPED by the next deploy of anything cut from main. `to` cannot
+# catch this (merge-back happens after the deploy -- see the function-to notes
+# below). The earliest correct place is here: before a new release branch is
+# cut, the ref it is cut from must already contain everything production runs.
+#
+# How "what production runs" is resolved, with no local releases.* state
+# required (agent containers are ephemeral and never ran `git release init`):
+#
+#   * Production target branch(es): $GIT_RELEASE_PROD_BRANCH (space- or
+#     comma-separated), else every `releases.prodbranch` value, else
+#     `prod-live`. Only PRODUCTION targets are checked -- a dev/stage target
+#     legitimately carries an RC that is not in main yet.
+#   * origin/<prod> missing                -> first release (or not configured):
+#                                             NOTICE, nothing to check, pass.
+#   * origin/<prod> tip is a merge commit  -> it is `to`'s synthesized
+#                                             --no-ff merge; the merge commit
+#                                             itself is exempt, but EVERY parent
+#                                             (old main, the release tip) must
+#                                             be contained.
+#   * origin/<prod> tip is not a merge     -> a direct push, a hotfix, or a
+#                                             target created from main; the tip
+#                                             itself must be contained.
+#
+# "Contained" means `git merge-base --is-ancestor <commit> origin/<main>`.
+# For `next` a second base is accepted: the RC being extended. rc(N+1) is cut
+# from rc(N), so if rc(N) is what production runs, rc(N+1) still carries it and
+# the next deploy regresses nothing; merge-back is then enforced at the next
+# `roll`. Blocking that case would break the normal "second prod deploy of a
+# version" flow -- the failure mode that got the R-e/R-f guards removed.
+#
+# Override: GIT_RELEASE_SKIP_MERGEBACK_CHECK="<reason>". The check still runs
+# and prints what it found; only a FAILURE is overridden, and the reason is
+# written as a `Merge-back-check:` trailer into the release-definition commit,
+# so the skip is recorded in the pushed RC branch's history. A bare 1/true/yes
+# is refused: the point of the override is the recorded reason.
+
+MERGEBACK_TRAILER=""
+
+# -- util - list production target branches (LOCAL names; prepend origin/)
+function prodbranches {
+	if [ -n "${GIT_RELEASE_PROD_BRANCH:-}" ]
+		then
+		echo "$GIT_RELEASE_PROD_BRANCH" | tr ',' ' '
+		return 0
+	fi
+	local CONFIGURED
+	CONFIGURED=$(git config --get-all releases.prodbranch)
+	if [ -n "$CONFIGURED" ]
+		then echo $CONFIGURED
+		else echo "prod-live"
+	fi
+}
+
+# -- util - set (replace) the production target branch
+function setprodbranch {
+	git config --local --replace-all releases.prodbranch "$1"
+}
+
+# -- util - add another production target branch (multi-target repos)
+function addprodbranch {
+	git config --local --add releases.prodbranch "$1"
+}
+
+# -- check_mergeback [<extra-base-ref>]
+#    Returns 0 when every production target is contained in origin/<main>
+#    (or in <extra-base-ref>), or when a failure is overridden with a reason.
+#    Returns 1 otherwise. Never touches the working tree.
+function check_mergeback {
+	local EXTRA_BASE=${1:-}
+	local MAIN_REF
+	MAIN_REF="origin/$(mainbranch)"
+	local SKIP_REASON=${GIT_RELEASE_SKIP_MERGEBACK_CHECK:-}
+	MERGEBACK_TRAILER=""
+
+	fetchall
+
+	if ! git rev-parse -q --verify "$MAIN_REF^{commit}" > /dev/null
+		then
+		echo "ERROR: merge-back check: $MAIN_REF does not exist; cannot verify" >&2
+		echo "       that production is contained in main. Push main first." >&2
+		return 1
+	fi
+
+	local MISSING=""
+	local PROD PROD_REF PARENTS CHECK C
+	for PROD in $(prodbranches)
+	do
+		PROD_REF="origin/$PROD"
+		if ! git rev-parse -q --verify "$PROD_REF^{commit}" > /dev/null
+			then
+			echo "NOTICE: merge-back check: $PROD_REF not found (first release, or set" >&2
+			echo "        'git release setprodbranch <name>'). Nothing to check." >&2
+			continue
+		fi
+		PARENTS=$(git rev-list --parents -n 1 "$PROD_REF" | cut -d' ' -f2-)
+		if [ "$(echo "$PARENTS" | wc -w)" -ge 2 ]
+			then CHECK=$PARENTS
+			else CHECK=$(git rev-parse "$PROD_REF")
+		fi
+		for C in $CHECK
+		do
+			if git merge-base --is-ancestor "$C" "$MAIN_REF"
+				then continue
+			fi
+			if [ -n "$EXTRA_BASE" ] && git merge-base --is-ancestor "$C" "$EXTRA_BASE"
+				then
+				echo "NOTICE: merge-back check: $PROD_REF carries $(git rev-parse --short "$C"), which is not" >&2
+				echo "        in $MAIN_REF yet but IS in $EXTRA_BASE, so this RC carries it forward." >&2
+				echo "        Merge-back is still owed and will be enforced at the next 'roll'." >&2
+				continue
+			fi
+			MISSING="$MISSING $PROD_REF:$C"
+		done
+	done
+
+	if [ -z "$MISSING" ]
+		then
+		echo "Merge-back check: OK (production is contained in $MAIN_REF)."
+		if [ -n "$SKIP_REASON" ]
+			then
+			echo "NOTICE: GIT_RELEASE_SKIP_MERGEBACK_CHECK is set but the check passed; nothing skipped." >&2
+		fi
+		return 0
+	fi
+
+	local ENTRY NAMES
+	echo "ERROR: merge-back missing. Production runs commits that are not in $MAIN_REF." >&2
+	echo "       A release cut now would silently DROP them on its next prod deploy." >&2
+	for ENTRY in $MISSING
+	do
+		PROD_REF=${ENTRY%%:*}
+		C=${ENTRY#*:}
+		NAMES=$(git branch -r --contains "$C" --list 'origin/*' 2>/dev/null \
+			| sed 's/^[* ]*//' | grep -v -e ' -> ' -e "^$PROD_REF\$" | tr '\n' ' ')
+		echo "         $PROD_REF carries $C" >&2
+		echo "           (on: ${NAMES:-no other remote branch})" >&2
+	done
+	echo "       Recover: merge that release back into main, then re-run this command:" >&2
+	echo "         git release merge $(mainbranch)      # if releases.current is still that release" >&2
+	echo "         # otherwise: git checkout $(mainbranch) && git pull origin $(mainbranch) \\" >&2
+	echo "         #   && git merge --no-ff origin/<release-branch> && git push origin $(mainbranch)" >&2
+	echo "       Verify:  git merge-base --is-ancestor <commit-above> $MAIN_REF && echo merged" >&2
+
+	if [ -z "$SKIP_REASON" ]
+		then
+		echo "       Override (recorded in the RC's history):" >&2
+		echo "         GIT_RELEASE_SKIP_MERGEBACK_CHECK=\"<why>\" git release <roll|next>" >&2
+		return 1
+	fi
+	case "$(echo "$SKIP_REASON" | tr '[:upper:]' '[:lower:]')" in
+		1|true|yes|y|on)
+			echo "ERROR: GIT_RELEASE_SKIP_MERGEBACK_CHECK='$SKIP_REASON' is not a reason." >&2
+			echo "       Set it to why the skip is safe; it is recorded in the RC commit." >&2
+			return 1
+			;;
+	esac
+	echo "WARNING: merge-back check FAILED and was SKIPPED: $SKIP_REASON" >&2
+	MERGEBACK_TRAILER="Merge-back-check: skipped ($SKIP_REASON); missing:$MISSING"
+	return 0
+}
+
 function roll {
+	# Guard BEFORE nextreleasebranch: that helper bumps releases.candidate as a
+	# side effect, so a refused roll must not have consumed a candidate number.
+	if ! check_mergeback
+		then
+		return 1
+	fi
+
 	# Name of new release branch to be created
 	RELEASE_BRANCH=$(nextreleasebranch)
 
@@ -197,7 +369,7 @@ function roll {
 
 	git add "version"
 
-	git commit -m "Adding Release Branch Definition file"
+	git commit -m "Adding Release Branch Definition file" ${MERGEBACK_TRAILER:+-m "$MERGEBACK_TRAILER"}
 
   afterversioncommit
 
@@ -221,6 +393,13 @@ function roll {
 function next {
 	# Name of new release branch to be created
 	RELEASE_BRANCH=$(releasebranch)
+
+	# Guard BEFORE nextreleasebranch (it bumps releases.candidate). rc(N+1) is
+	# cut from rc(N), so rc(N) is an accepted base alongside origin/main.
+	if ! check_mergeback "$RELEASE_BRANCH"
+		then
+		return 1
+	fi
 	NEXT_RELEASE_BRANCH=$(nextreleasebranch)
 
 	echo "Creating $RELEASE_BRANCH..."
@@ -235,7 +414,7 @@ function next {
 
 	git add "version"
 
-	git commit -m "Appending Release Branch Definition file"
+	git commit -m "Appending Release Branch Definition file" ${MERGEBACK_TRAILER:+-m "$MERGEBACK_TRAILER"}
 
   afterversioncommit
 
@@ -599,8 +778,8 @@ function to {
 	# check here. Merge-back happens AFTER the deploy in this workflow, so such
 	# a check runs before the merge-back can possibly have occurred — it would
 	# fail on every deploy and return non-zero despite a successful push.
-	# The correct place to catch a never-merged-back release is when the NEXT
-	# release is cut from main (`roll`/`next`), not at deploy time.
+	# A never-merged-back release is caught when the NEXT release is cut
+	# (`roll`/`next`): see check_mergeback.
 
 	return 0
 }
@@ -1862,6 +2041,8 @@ RELEASE MANAGEMENT
     remove <branch>                 Remove a branch from the release list by exact ref
     roll                            Create a new RC branch from main with all release branches
     next                            Create a new RC branch from the current RC (carries fixes forward)
+    setprodbranch <name>            Production target checked by roll/next (default prod-live)
+    addprodbranch <name>            Add another production target (multi-target repos)
     append                          Re-merge all release branches into the current RC
     duplicate                       Copy the current release config into a new version [tty]
     checkout [true]                 Switch between release branches [tty] without 'true'
@@ -1938,6 +2119,12 @@ UNATTENDED USE
       set{main,stage,qa,develop}branch <name>, set*deployurl <url>,
       roll, next, append, push, to <branch>, stage, qa, merge <branch>, tag,
       deploy <env>, checkout true, writeout, upgrade, help
+
+    roll/next refuse to cut (exit 1, nothing created) when production carries
+    a release that is not merged back into origin/main. Recover with
+    'git release merge main'; override with
+    GIT_RELEASE_SKIP_MERGEBACK_CHECK="<reason>" (recorded as a commit trailer).
+    GIT_RELEASE_PROD_BRANCH overrides the production target(s) without config.
 
     roll/next/append exit 1 and skip the push when a merge conflicts, so check
     the exit code and confirm the branch reached origin:

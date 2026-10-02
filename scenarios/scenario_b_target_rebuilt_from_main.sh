@@ -35,12 +35,6 @@ note "Setup: prod-live at M0 in origin"
 create_branch_from prod-live main
 push_branch prod-live
 
-note "Setup: commit a throwaway change directly on prod-live and push"
-commit_on   prod-live    extra.txt   "extra"   "prod-live: throwaway commit X"
-push_branch prod-live
-DISCARD_SHA=$(cd "$REPO" && git rev-parse prod-live)
-note "commit that must be discarded: $DISCARD_SHA"
-
 note "Setup: hotfix branch + release"
 create_branch_from feature/hotfix main
 commit_on   feature/hotfix   fix.txt   "fix"   "hotfix"
@@ -50,6 +44,15 @@ run_release add origin/feature/hotfix
 run_release roll <<< "n"
 RELEASE_BRANCH=$(cd "$REPO" && "$GIT_RELEASE_BIN" releasebranch | tr -d '\n')
 RELEASE_TIP=$(cd "$REPO" && git rev-parse "$RELEASE_BRANCH")
+
+# The stray prod-live commit is added AFTER the roll: roll/next refuse to cut
+# while production carries commits not in main (check_mergeback, scenario F).
+note "Setup: commit a throwaway change directly on prod-live and push"
+commit_on   prod-live    extra.txt   "extra"   "prod-live: throwaway commit X"
+push_branch prod-live
+DISCARD_SHA=$(cd "$REPO" && git rev-parse prod-live)
+note "commit that must be discarded: $DISCARD_SHA"
+
 note "release branch = $RELEASE_BRANCH @ $RELEASE_TIP"
 
 note "Setup: AFTER the roll, advance origin/main with a commit not in the release"
